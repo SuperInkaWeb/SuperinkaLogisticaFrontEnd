@@ -1,68 +1,37 @@
-import React, { createContext, useContext, useState, ReactNode } from 'react';
+import React, { createContext, useContext, ReactNode } from 'react';
 
-type Currency = 'EUR' | 'USD' | 'PEN' | 'MXN';
-
-interface CurrencyConfig {
-  code: Currency;
-  symbol: string;
-  name: string;
-  rate: number;
-}
-
-const currenciesData: Record<Currency, CurrencyConfig> = {
-  EUR: { code: 'EUR', symbol: '€', name: 'Euro', rate: 1 },
-  USD: { code: 'USD', symbol: '$', name: 'Dólar Americano', rate: 1.08 },
-  PEN: { code: 'PEN', symbol: 'S/', name: 'Sol Peruano', rate: 4.05 },
-  MXN: { code: 'MXN', symbol: '$', name: 'Peso Mexicano', rate: 18.50 },
-};
-
+// Simplificamos la interfaz para solo exponer lo que usamos
 interface CurrencyContextType {
-  currency: Currency;
-  currencyConfig: CurrencyConfig;
-  setCurrency: (currency: Currency) => void;
-  formatPrice: (amount: number) => string;
-  currencies: Record<Currency, CurrencyConfig>;
+    formatMoney: (amount: number) => string;
 }
 
 const CurrencyContext = createContext<CurrencyContextType | undefined>(undefined);
 
-export const CurrencyProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [currency, setCurrencyState] = useState<Currency>(() => {
-    const saved = localStorage.getItem('superinka_currency');
-    return (saved as Currency) || 'EUR';
-  });
-
-  const setCurrency = (newCurrency: Currency) => {
-    setCurrencyState(newCurrency);
-    localStorage.setItem('superinka_currency', newCurrency);
-  };
-
-  const currencyConfig = currenciesData[currency];
-
-  const formatPrice = (amount: number): string => {
-    const converted = amount * currencyConfig.rate;
-    return `${currencyConfig.symbol}${converted.toFixed(2)}`;
-  };
-
-  return (
-    <CurrencyContext.Provider
-      value={{
-        currency,
-        currencyConfig,
-        setCurrency,
-        formatPrice,
-        currencies: currenciesData,
-      }}
-    >
-      {children}
-    </CurrencyContext.Provider>
-  );
+export const useCurrency = () => {
+    const context = useContext(CurrencyContext);
+    if (!context) {
+        throw new Error('useCurrency must be used within a CurrencyProvider');
+    }
+    return context;
 };
 
-export const useCurrency = () => {
-  const context = useContext(CurrencyContext);
-  if (context === undefined) {
-    throw new Error('useCurrency must be used within a CurrencyProvider');
-  }
-  return context;
+export const CurrencyProvider = ({ children }: { children: ReactNode }) => {
+    const formatMoney = (amount: number) => {
+        // Configuración estricta para Perú:
+        // 1. style: 'currency' -> Agrega símbolo
+        // 2. currency: 'PEN' -> Código internacional para Nuevos Soles
+        // 3. 'es-PE' -> Formato de miles y decimales peruano (1,000.00)
+        return new Intl.NumberFormat('es-PE', {
+            style: 'currency',
+            currency: 'PEN',
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+        }).format(amount);
+    };
+
+    return (
+        <CurrencyContext.Provider value={{ formatMoney }}>
+            {children}
+        </CurrencyContext.Provider>
+    );
 };

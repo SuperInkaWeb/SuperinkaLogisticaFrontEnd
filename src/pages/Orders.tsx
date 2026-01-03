@@ -1,664 +1,447 @@
-import React, { useState } from 'react';
-import { useOrders, useCarriers, Order, dataService } from '@/hooks/useSupabaseData';
-import StatusBadge from '@/frontend/components/ui/StatusBadge';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from '@/components/ui/dialog';
-import { Label } from '@/components/ui/label';
-import { Search, MoreHorizontal, Eye, Download, Truck, CheckCircle, RotateCcw, Filter, Plus, Package, MapPin, Calendar, Clock } from 'lucide-react';
-import { Skeleton } from '@/components/ui/skeleton';
-import { toast } from 'sonner';
-import { useCurrency } from '@/context/CurrencyContext';
-import jsPDF from 'jspdf';
+import React, { useEffect, useState } from 'react';
+import DashboardLayout from "@/frontend/components/layout/DashboardLayout";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { useApiData, Order } from "@/hooks/useApiData";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { useAuth } from "@/frontend/context/AuthContext";
+import { Eye, Truck, CheckCircle, Store, ArrowRight, XCircle, Search, Calendar, History } from "lucide-react";
+import { useCurrency } from "@/context/CurrencyContext";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
+import { useToast } from "@/hooks/use-toast";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 
 const Orders: React.FC = () => {
-  const { data: orders, loading: ordersLoading, refetch } = useOrders();
-  const { data: carriers } = useCarriers();
-  const { formatPrice } = useCurrency();
-  const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<string>('all');
-  const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [isDetailsDialogOpen, setIsDetailsDialogOpen] = useState(false);
-  const [isCarrierDialogOpen, setIsCarrierDialogOpen] = useState(false);
-  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
-  const [newCarrierId, setNewCarrierId] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [newOrder, setNewOrder] = useState({
-    order_number: '',
-    origin: '',
-    destination: '',
-    total: 0,
-    products_count: 1,
-    otn: '',
-    carrier_id: '',
-    status: 'pendiente' as Order['status'],
-  });
+    const { getOrders, updateOrderStatus, assignCarrierToOrder, getCarriers } = useApiData();
+    const { user } = useAuth();
+    const { formatMoney } = useCurrency();
+    const { toast } = useToast();
 
-  const generateOrderNumber = () => {
-    const prefix = 'ORD';
-    const timestamp = Date.now().toString().slice(-6);
-    const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
-    return `${prefix}-${timestamp}-${random}`;
-  };
+    const [orders, setOrders] = useState<Order[]>([]);
+    const [carriers, setCarriers] = useState<any[]>([]);
+    const [selectedCarrier, setSelectedCarrier] = useState("");
 
-  const generateOTN = () => {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    let otn = '';
-    for (let i = 0; i < 12; i++) {
-      otn += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    return otn;
-  };
+    // Estados para Filtros
+    const today = new Date().toISOString().split('T')[0];
+    const [dateFilter, setDateFilter] = useState<string>(today);
+    const [showHistory, setShowHistory] = useState(false);
+    const [searchTerm, setSearchTerm] = useState("");
+    const [statusFilter, setStatusFilter] = useState("todos");
 
-  const filteredOrders = orders.filter(order => {
-    const matchesSearch = 
-      order.order_number.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      order.destination.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      order.otn.toLowerCase().includes(searchQuery.toLowerCase());
-    
-    const matchesStatus = statusFilter === 'all' || order.status === statusFilter;
-    
-    return matchesSearch && matchesStatus;
-  });
+    // Modal Detalles
+    const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+    const [isDetailsOpen, setIsDetailsOpen] = useState(false);
+    const [manualStatus, setManualStatus] = useState("");
 
-  const getCarrierName = (carrierId?: string | null) => {
-    if (!carrierId) return '-';
-    return carriers.find(c => c.id === carrierId)?.name || '-';
-  };
+    const role = user?.role?.toLowerCase().replace('role_', '') || 'operador';
+    const isAdminOrStaff = ['admin', 'supervisor', 'operador'].includes(role);
 
-  const handleUpdateStatus = async (orderId: string, newStatus: Order['status']) => {
-    try {
-      await dataService.updateOrder(orderId, { status: newStatus });
-      toast.success('Estado actualizado correctamente');
-      refetch();
-    } catch (error) {
-      toast.error('Error al actualizar el estado');
-    }
-  };
+    const loadData = async () => {
+        try {
+            const [ordersData, carriersData] = await Promise.all([
+                getOrders(),
+                getCarriers()
+            ]);
+            // Ordenar por fecha descendente (más reciente primero)
+            setOrders(ordersData.sort((a, b) => (b.date || '').localeCompare(a.date || '')));
+            setCarriers(carriersData);
+        } catch (e) { console.error(e); }
+    };
 
-  const handleOpenDetails = (order: Order) => {
-    setSelectedOrder(order);
-    setIsDetailsDialogOpen(true);
-  };
+    useEffect(() => { loadData(); }, []);
 
-  const handleOpenChangeCarrier = (order: Order) => {
-    setSelectedOrder(order);
-    setNewCarrierId(order.carrier_id || '');
-    setIsCarrierDialogOpen(true);
-  };
+    // --- LÓGICA DE FILTRADO ---
+    const filteredOrders = orders.filter(order => {
+        // 1. Filtro de Fecha
+        // Para clientes (sin controles de fecha), si hay búsqueda ignoramos la fecha para buscar en todo el historial,
+        // de lo contrario mostramos solo hoy (comportamiento por defecto) o todo si se prefiere.
+        // Ajuste: Si es Admin usa los controles. Si es Cliente, usa lógica automática.
+        let matchesDate = true;
+        if (isAdminOrStaff) {
+            matchesDate = showHistory || (order.date === dateFilter);
+        } else {
+            // Cliente: Si busca algo, busca en todo. Si no, solo hoy.
+            matchesDate = searchTerm ? true : (order.date === dateFilter);
+        }
 
-  const handleChangeCarrier = async () => {
-    if (!selectedOrder) return;
+        // 2. Filtro de Estado
+        const matchesStatus = statusFilter === "todos" || order.status === statusFilter;
 
-    setIsSubmitting(true);
-    try {
-      await dataService.updateOrder(selectedOrder.id, { carrier_id: newCarrierId || null });
-      toast.success('Transportista actualizado correctamente');
-      setIsCarrierDialogOpen(false);
-      setSelectedOrder(null);
-      refetch();
-    } catch (error) {
-      toast.error('Error al cambiar transportista');
-      console.error(error);
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
+        // 3. Buscador (Nro Orden o Cliente)
+        const searchLower = searchTerm.toLowerCase();
+        const orderNum = order.orderNumber?.toLowerCase() || "";
+        const clientName = (order.user as any)?.name?.toLowerCase() || "";
+        const matchesSearch = orderNum.includes(searchLower) || clientName.includes(searchLower);
 
-  const handleDownloadLabel = (order: Order) => {
-    const doc = new jsPDF();
-    const carrierName = getCarrierName(order.carrier_id);
-    
-    // Header
-    doc.setFontSize(20);
-    doc.text('ETIQUETA DE ENVÍO', 105, 25, { align: 'center' });
-    doc.setFontSize(12);
-    doc.text('SuperInka Logistics', 105, 35, { align: 'center' });
-    
-    // Order info box
-    doc.setDrawColor(0);
-    doc.setLineWidth(0.5);
-    doc.rect(15, 45, 180, 85);
-    
-    // Left column - From
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'bold');
-    doc.text('REMITENTE:', 20, 55);
-    doc.setFont('helvetica', 'normal');
-    doc.text(order.origin, 20, 62);
-    
-    // Right column - To
-    doc.setFont('helvetica', 'bold');
-    doc.text('DESTINATARIO:', 110, 55);
-    doc.setFont('helvetica', 'normal');
-    doc.text(order.destination, 110, 62);
-    
-    // Horizontal line
-    doc.line(15, 75, 195, 75);
-    
-    // Order details
-    doc.setFontSize(11);
-    doc.setFont('helvetica', 'bold');
-    doc.text('Nº Orden:', 20, 85);
-    doc.setFont('helvetica', 'normal');
-    doc.text(order.order_number, 55, 85);
-    
-    doc.setFont('helvetica', 'bold');
-    doc.text('OTN:', 110, 85);
-    doc.setFont('helvetica', 'normal');
-    doc.text(order.otn, 125, 85);
-    
-    doc.setFont('helvetica', 'bold');
-    doc.text('Fecha:', 20, 95);
-    doc.setFont('helvetica', 'normal');
-    doc.text(`${order.date} ${order.time}`, 45, 95);
-    
-    doc.setFont('helvetica', 'bold');
-    doc.text('Transportista:', 110, 95);
-    doc.setFont('helvetica', 'normal');
-    doc.text(carrierName, 145, 95);
-    
-    doc.setFont('helvetica', 'bold');
-    doc.text('Productos:', 20, 105);
-    doc.setFont('helvetica', 'normal');
-    doc.text(String(order.products_count), 55, 105);
-    
-    doc.setFont('helvetica', 'bold');
-    doc.text('Total:', 110, 105);
-    doc.setFont('helvetica', 'normal');
-    doc.text(formatPrice(order.total), 130, 105);
-    
-    // Barcode placeholder
-    doc.setFontSize(14);
-    doc.setFont('helvetica', 'bold');
-    doc.text(order.otn, 105, 120, { align: 'center' });
-    doc.setFontSize(8);
-    doc.text('||| |||| || ||| |||| ||| || ||||', 105, 125, { align: 'center' });
-    
-    // Footer
-    doc.setFontSize(8);
-    doc.text(`Generado el ${new Date().toLocaleString()}`, 105, 145, { align: 'center' });
-    
-    doc.save(`etiqueta_${order.order_number}.pdf`);
-    toast.success('Etiqueta descargada');
-  };
+        return matchesDate && matchesStatus && matchesSearch;
+    });
 
-  const handleCreateOrder = async () => {
-    if (!newOrder.origin || !newOrder.destination) {
-      toast.error('Por favor completa los campos requeridos');
-      return;
-    }
+    // Métricas rápidas de la vista actual
+    const totalFiltered = filteredOrders.length;
+    const totalPending = filteredOrders.filter(o => o.status === 'pendiente').length;
+    const totalAmount = filteredOrders.reduce((sum, o) => sum + o.total, 0);
 
-    setIsSubmitting(true);
-    try {
-      const now = new Date();
-      const date = now.toISOString().split('T')[0];
-      const time = now.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+    const handleStatusChange = async (id: string, newStatus: string) => {
+        await updateOrderStatus(id, newStatus);
+        toast({ title: "Estado Actualizado", description: `Pedido marcado como ${newStatus.replace('_', ' ')}` });
+        loadData();
+        if (selectedOrder?.id === id) {
+            setIsDetailsOpen(false);
+        }
+    };
 
-      await dataService.createOrder({
-        order_number: newOrder.order_number || generateOrderNumber(),
-        origin: newOrder.origin,
-        destination: newOrder.destination,
-        date,
-        time,
-        total: newOrder.total,
-        products_count: newOrder.products_count,
-        otn: newOrder.otn || generateOTN(),
-        status: newOrder.status,
-        carrier_id: newOrder.carrier_id || null,
-      });
-      toast.success('Orden creada correctamente');
-      setIsDialogOpen(false);
-      setNewOrder({
-        order_number: '',
-        origin: '',
-        destination: '',
-        total: 0,
-        products_count: 1,
-        otn: '',
-        carrier_id: '',
-        status: 'pendiente',
-      });
-      refetch();
-    } catch (error) {
-      toast.error('Error al crear la orden');
-      console.error(error);
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
+    const handleAssignCarrier = async (orderId: string) => {
+        if (!selectedCarrier) {
+            toast({ variant: "destructive", title: "Error", description: "Selecciona un transportista" });
+            return;
+        }
+        await assignCarrierToOrder(orderId, selectedCarrier);
+        setSelectedCarrier("");
+        loadData();
+    };
 
-  if (ordersLoading) {
+    const getStatusBadge = (status: string) => {
+        const styles: any = {
+            'pendiente': 'bg-yellow-500 hover:bg-yellow-600',
+            'en_proceso': 'bg-blue-500 hover:bg-blue-600',
+            'en_ruta': 'bg-purple-500 hover:bg-purple-600',
+            'entregado': 'bg-green-500 hover:bg-green-600',
+            'cancelado': 'bg-red-500 hover:bg-red-600',
+            'entregado_parcial': 'bg-teal-500 hover:bg-teal-600'
+        };
+        return <Badge className={`${styles[status] || 'bg-gray-500'} capitalize border-0 shadow-sm`}>{status.replace('_', ' ')}</Badge>;
+    };
+
     return (
-      <div className="space-y-6 animate-fade-in">
-        <div className="flex justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-foreground">Órdenes y Envíos</h1>
-            <p className="text-muted-foreground">Gestiona todas las órdenes del sistema</p>
-          </div>
-        </div>
-        <Skeleton className="h-20 w-full" />
-        <Skeleton className="h-96 w-full" />
-      </div>
+        <DashboardLayout>
+            <div className="space-y-6 animate-fade-in">
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                    <div>
+                        <h1 className="text-3xl font-bold tracking-tight text-gray-900 dark:text-gray-100">
+                            {isAdminOrStaff ? "Gestión de Pedidos" : "Mis Pedidos"}
+                        </h1>
+                        <p className="text-muted-foreground">
+                            {isAdminOrStaff ? "Administra el flujo de despacho y entrega." : "Historial y estado de tus compras."}
+                        </p>
+                    </div>
+
+                    {/* Tarjetas Resumen Rápidas (SOLO GESTIÓN) */}
+                    {isAdminOrStaff && (
+                        <div className="hidden md:flex gap-4">
+                            <Card className="p-3 flex flex-col justify-center min-w-[120px] bg-slate-50 dark:bg-slate-900 border-none shadow-sm">
+                                <span className="text-xs text-muted-foreground font-medium uppercase">Total</span>
+                                <span className="text-xl font-bold">{totalFiltered}</span>
+                            </Card>
+                            <Card className="p-3 flex flex-col justify-center min-w-[120px] bg-yellow-50 dark:bg-yellow-900/20 border-none shadow-sm">
+                                <span className="text-xs text-yellow-700 dark:text-yellow-500 font-medium uppercase">Pendientes</span>
+                                <span className="text-xl font-bold text-yellow-800 dark:text-yellow-400">{totalPending}</span>
+                            </Card>
+                            <Card className="p-3 flex flex-col justify-center min-w-[120px] bg-green-50 dark:bg-green-900/20 border-none shadow-sm">
+                                <span className="text-xs text-green-700 dark:text-green-500 font-medium uppercase">Monto</span>
+                                <span className="text-xl font-bold text-green-800 dark:text-green-400">{formatMoney(totalAmount)}</span>
+                            </Card>
+                        </div>
+                    )}
+                </div>
+
+                {/* BARRA DE FILTROS */}
+                <Card className={`border-l-4 ${isAdminOrStaff ? 'border-l-primary' : 'border-l-slate-400'}`}>
+                    <CardContent className="p-4 flex flex-col md:flex-row gap-4 items-end md:items-center">
+
+                        {/* 1. Buscador (VISIBLE PARA TODOS) */}
+                        <div className="w-full md:w-auto flex-1 space-y-1">
+                            <Label htmlFor="search" className="text-xs font-semibold">Buscar</Label>
+                            <div className="relative">
+                                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                                <Input
+                                    id="search"
+                                    placeholder={isAdminOrStaff ? "Nro Orden o Cliente..." : "Buscar mis pedidos..."}
+                                    className="pl-9"
+                                    value={searchTerm}
+                                    onChange={(e) => setSearchTerm(e.target.value)}
+                                />
+                            </div>
+                        </div>
+
+                        {/* FILTROS SOLO PARA GESTIÓN */}
+                        {isAdminOrStaff && (
+                            <>
+                                {/* 2. Filtro de Estado */}
+                                <div className="w-full md:w-[180px] space-y-1">
+                                    <Label className="text-xs font-semibold">Estado</Label>
+                                    <Select value={statusFilter} onValueChange={setStatusFilter}>
+                                        <SelectTrigger>
+                                            <SelectValue placeholder="Todos" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="todos">Todos</SelectItem>
+                                            <SelectItem value="pendiente">Pendientes</SelectItem>
+                                            <SelectItem value="en_proceso">En Proceso</SelectItem>
+                                            <SelectItem value="en_ruta">En Ruta</SelectItem>
+                                            <SelectItem value="entregado">Entregados</SelectItem>
+                                            <SelectItem value="cancelado">Cancelados</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+
+                                {/* 3. Filtro de Fecha */}
+                                <div className="w-full md:w-auto flex items-center gap-4">
+                                    <div className="space-y-1">
+                                        <Label htmlFor="date" className={`text-xs font-semibold ${showHistory ? 'text-muted-foreground' : ''}`}>Fecha</Label>
+                                        <div className="relative">
+                                            <Calendar className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                                            <Input
+                                                id="date"
+                                                type="date"
+                                                className="pl-9 w-[160px]"
+                                                value={dateFilter}
+                                                onChange={(e) => { setDateFilter(e.target.value); setShowHistory(false); }}
+                                                disabled={showHistory}
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div className="flex flex-col space-y-2 mt-5">
+                                        <div className="flex items-center space-x-2">
+                                            <Switch id="history-mode" checked={showHistory} onCheckedChange={setShowHistory} />
+                                            <Label htmlFor="history-mode" className="text-sm font-medium cursor-pointer flex items-center gap-1">
+                                                <History className="h-3 w-3" /> Histórico
+                                            </Label>
+                                        </div>
+                                    </div>
+                                </div>
+                            </>
+                        )}
+                    </CardContent>
+                </Card>
+
+                {/* TABLA DE PEDIDOS */}
+                <Card>
+                    <CardHeader className="pb-2">
+                        <CardTitle className="text-lg">
+                            {/* Título dinámico según rol y filtros */}
+                            {!isAdminOrStaff && !searchTerm
+                                ? "Pedidos de Hoy"
+                                : showHistory || searchTerm
+                                    ? 'Resultados'
+                                    : `Pedidos del ${dateFilter}`}
+                        </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        <Table>
+                            <TableHeader>
+                                <TableRow>
+                                    <TableHead>Orden #</TableHead>
+                                    <TableHead>Hora/Fecha</TableHead>
+                                    {isAdminOrStaff && <TableHead>Cliente</TableHead>}
+                                    <TableHead>Tipo Entrega</TableHead>
+                                    <TableHead>Total</TableHead>
+                                    <TableHead>Estado</TableHead>
+                                    <TableHead className="text-right">Acciones</TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                {filteredOrders.length === 0 ? (
+                                    <TableRow>
+                                        <TableCell colSpan={isAdminOrStaff ? 7 : 6} className="text-center h-24 text-muted-foreground">
+                                            No se encontraron pedidos.
+                                        </TableCell>
+                                    </TableRow>
+                                ) : (
+                                    filteredOrders.map((order) => (
+                                        <TableRow key={order.id}>
+                                            <TableCell className="font-mono">{order.orderNumber}</TableCell>
+                                            <TableCell>
+                                                <div className="flex flex-col">
+                                                    <span className="font-medium">{order.time?.substring(0, 5)}</span>
+                                                    <span className="text-[10px] text-muted-foreground">{order.date}</span>
+                                                </div>
+                                            </TableCell>
+                                            {isAdminOrStaff && <TableCell className="font-medium">{(order.user as any)?.name || 'Usuario'}</TableCell>}
+                                            <TableCell>
+                                                <div className="flex items-center gap-2">
+                                                    {order.deliveryType === 'warehouse' ? (
+                                                        <>
+                                                            <Store className="h-4 w-4 text-orange-500" />
+                                                            <span className="text-xs">Recojo (Despacho)</span>
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <Truck className="h-4 w-4 text-blue-500" />
+                                                            <span className="text-xs">Domicilio Cliente</span>
+                                                        </>
+                                                    )}
+                                                </div>
+                                            </TableCell>
+                                            <TableCell className="font-bold">{formatMoney(order.total)}</TableCell>
+                                            <TableCell>{getStatusBadge(order.status || 'pendiente')}</TableCell>
+                                            <TableCell className="text-right">
+                                                <div className="flex justify-end gap-2 items-center">
+
+                                                    {/* ASIGNAR TRANSPORTE */}
+                                                    {isAdminOrStaff && order.deliveryType === 'delivery' && !['entregado', 'cancelado'].includes(order.status || '') && (
+                                                        <div className="flex gap-1 items-center mr-2">
+                                                            {!order.carrier ? (
+                                                                <>
+                                                                    <Select value={selectedCarrier} onValueChange={setSelectedCarrier}>
+                                                                        <SelectTrigger className="w-[110px] h-8 text-xs">
+                                                                            <SelectValue placeholder="Transporte" />
+                                                                        </SelectTrigger>
+                                                                        <SelectContent>
+                                                                            {carriers.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                                                                        </SelectContent>
+                                                                    </Select>
+                                                                    <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-green-600 hover:text-green-700" onClick={() => handleAssignCarrier(order.id!)}>
+                                                                        <CheckCircle className="h-4 w-4"/>
+                                                                    </Button>
+                                                                </>
+                                                            ) : (
+                                                                <Badge variant="outline" className="text-[10px] border-blue-200 bg-blue-50 text-blue-700 h-6 flex gap-1">
+                                                                    <Truck className="h-3 w-3"/> {order.carrier.name}
+                                                                </Badge>
+                                                            )}
+                                                        </div>
+                                                    )}
+
+                                                    {/* BOTONES DE FLUJO */}
+                                                    {isAdminOrStaff && (
+                                                        <>
+                                                            {order.status === 'pendiente' && (
+                                                                <Button size="sm" className="h-8 bg-blue-600 hover:bg-blue-700 text-white" onClick={() => handleStatusChange(order.id!, 'en_proceso')}>
+                                                                    Procesar <ArrowRight className="ml-1 h-3 w-3" />
+                                                                </Button>
+                                                            )}
+                                                            {order.status === 'en_proceso' && order.deliveryType === 'delivery' && (
+                                                                <Button size="sm" className="h-8 bg-purple-600 hover:bg-purple-700 text-white" onClick={() => handleStatusChange(order.id!, 'en_ruta')}>
+                                                                    En Ruta <Truck className="ml-1 h-3 w-3" />
+                                                                </Button>
+                                                            )}
+                                                            {order.status === 'en_ruta' && (
+                                                                <Button size="sm" className="h-8 bg-green-600 hover:bg-green-700 text-white" onClick={() => handleStatusChange(order.id!, 'entregado')}>
+                                                                    Entregar <CheckCircle className="ml-1 h-3 w-3" />
+                                                                </Button>
+                                                            )}
+                                                        </>
+                                                    )}
+
+                                                    <Button variant="ghost" size="sm" onClick={() => { setSelectedOrder(order); setManualStatus(order.status || ''); setIsDetailsOpen(true); }}>
+                                                        <Eye className="h-4 w-4" />
+                                                    </Button>
+                                                </div>
+                                            </TableCell>
+                                        </TableRow>
+                                    ))
+                                )}
+                            </TableBody>
+                        </Table>
+                    </CardContent>
+                </Card>
+
+                {/* DIALOGO DE DETALLES */}
+                <Dialog open={isDetailsOpen} onOpenChange={setIsDetailsOpen}>
+                    <DialogContent className="max-w-3xl">
+                        <DialogHeader>
+                            <DialogTitle className="flex justify-between items-center pr-8">
+                                <span>Orden {selectedOrder?.orderNumber}</span>
+                                {selectedOrder && getStatusBadge(selectedOrder.status || 'pendiente')}
+                            </DialogTitle>
+                        </DialogHeader>
+
+                        {selectedOrder && (
+                            <div className="grid gap-6 py-4">
+                                <div className="grid grid-cols-2 gap-4 text-sm bg-slate-50 dark:bg-slate-900 p-4 rounded-lg">
+                                    <div className="space-y-1">
+                                        <span className="text-muted-foreground font-semibold">Cliente:</span>
+                                        <p className="font-medium">{(selectedOrder.user as any)?.name}</p>
+                                        <p className="text-xs text-muted-foreground">{(selectedOrder.user as any)?.email}</p>
+                                    </div>
+                                    <div className="space-y-1">
+                                        <span className="text-muted-foreground font-semibold">Entrega:</span>
+                                        <div className="flex items-center gap-2">
+                                            {selectedOrder.deliveryType === 'warehouse' ? <Store className="h-4 w-4"/> : <Truck className="h-4 w-4"/>}
+                                            <p className="capitalize">{selectedOrder.deliveryType === 'warehouse' ? 'Recojo en Almacén' : 'Envío a Domicilio'}</p>
+                                        </div>
+                                        <p className="text-xs text-muted-foreground">{selectedOrder.destination}</p>
+                                    </div>
+                                </div>
+
+                                <div className="border rounded-md">
+                                    <Table>
+                                        <TableHeader>
+                                            <TableRow className="bg-slate-50 dark:bg-slate-900">
+                                                <TableHead>Producto</TableHead>
+                                                <TableHead className="text-right">Precio</TableHead>
+                                                <TableHead className="text-right">Cant.</TableHead>
+                                                <TableHead className="text-right">Subtotal</TableHead>
+                                            </TableRow>
+                                        </TableHeader>
+                                        <TableBody>
+                                            {selectedOrder.items?.map((item, idx) => (
+                                                <TableRow key={idx}>
+                                                    <TableCell>{item.productName}</TableCell>
+                                                    <TableCell className="text-right">{formatMoney(item.price)}</TableCell>
+                                                    <TableCell className="text-right">{item.quantity}</TableCell>
+                                                    <TableCell className="text-right font-medium">
+                                                        {formatMoney(item.price * item.quantity)}
+                                                    </TableCell>
+                                                </TableRow>
+                                            ))}
+                                        </TableBody>
+                                    </Table>
+                                </div>
+
+                                <div className="flex justify-end gap-8 pt-2 items-center">
+                                    <div className="text-sm">
+                                        <span className="text-muted-foreground mr-2">Items:</span>
+                                        <span className="font-bold">{selectedOrder.productsCount}</span>
+                                    </div>
+                                    <div className="text-xl">
+                                        <span className="text-muted-foreground mr-2 font-light">Total:</span>
+                                        <span className="font-bold text-primary">{formatMoney(selectedOrder.total)}</span>
+                                    </div>
+                                </div>
+
+                                {isAdminOrStaff && (
+                                    <div className="bg-slate-50 dark:bg-slate-900 p-4 rounded-lg border border-slate-200 dark:border-slate-800">
+                                        <Label className="text-xs font-semibold uppercase text-muted-foreground mb-2 block">Gestión Manual</Label>
+                                        <div className="flex gap-3 items-end">
+                                            <div className="space-y-1 flex-1">
+                                                <span className="text-sm text-slate-600 dark:text-slate-400">Forzar cambio de estado:</span>
+                                                <Select value={manualStatus} onValueChange={setManualStatus}>
+                                                    <SelectTrigger>
+                                                        <SelectValue />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="pendiente">Pendiente</SelectItem>
+                                                        <SelectItem value="en_proceso">En Proceso</SelectItem>
+                                                        <SelectItem value="en_ruta">En Ruta</SelectItem>
+                                                        <SelectItem value="entregado">Entregado</SelectItem>
+                                                        <SelectItem value="cancelado">Cancelado</SelectItem>
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+                                            <Button onClick={() => handleStatusChange(selectedOrder.id!, manualStatus)}>
+                                                Actualizar
+                                            </Button>
+                                            {selectedOrder.status !== 'cancelado' && (
+                                                <Button variant="destructive" onClick={() => handleStatusChange(selectedOrder.id!, 'cancelado')}>
+                                                    <XCircle className="mr-2 h-4 w-4"/> Cancelar Orden
+                                                </Button>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </DialogContent>
+                </Dialog>
+            </div>
+        </DashboardLayout>
     );
-  }
-
-  return (
-    <div className="space-y-6 animate-fade-in">
-      {/* Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">Órdenes y Envíos</h1>
-          <p className="text-muted-foreground">Gestiona todas las órdenes del sistema</p>
-        </div>
-        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-          <DialogTrigger asChild>
-            <Button className="gradient-inka text-primary-foreground">
-              <Plus className="mr-2 h-4 w-4" />
-              Nueva Orden
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="sm:max-w-[500px]">
-            <DialogHeader>
-              <DialogTitle>Crear Nueva Orden</DialogTitle>
-              <DialogDescription>
-                Completa los datos de la nueva orden de envío.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="grid gap-4 py-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="order_number">Nº Orden</Label>
-                  <Input
-                    id="order_number"
-                    placeholder="Auto-generado"
-                    value={newOrder.order_number}
-                    onChange={(e) => setNewOrder({ ...newOrder, order_number: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="otn">OTN</Label>
-                  <Input
-                    id="otn"
-                    placeholder="Auto-generado"
-                    value={newOrder.otn}
-                    onChange={(e) => setNewOrder({ ...newOrder, otn: e.target.value })}
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="origin">Origen *</Label>
-                  <Input
-                    id="origin"
-                    placeholder="Ciudad de origen"
-                    value={newOrder.origin}
-                    onChange={(e) => setNewOrder({ ...newOrder, origin: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="destination">Destino *</Label>
-                  <Input
-                    id="destination"
-                    placeholder="Ciudad de destino"
-                    value={newOrder.destination}
-                    onChange={(e) => setNewOrder({ ...newOrder, destination: e.target.value })}
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="total">Total (€)</Label>
-                  <Input
-                    id="total"
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={newOrder.total}
-                    onChange={(e) => setNewOrder({ ...newOrder, total: parseFloat(e.target.value) || 0 })}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="products_count">Cantidad de Productos</Label>
-                  <Input
-                    id="products_count"
-                    type="number"
-                    min="1"
-                    value={newOrder.products_count}
-                    onChange={(e) => setNewOrder({ ...newOrder, products_count: parseInt(e.target.value) || 1 })}
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="carrier">Transportista</Label>
-                  <Select
-                    value={newOrder.carrier_id}
-                    onValueChange={(value) => setNewOrder({ ...newOrder, carrier_id: value })}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Seleccionar" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {carriers.filter(c => c.status === 'activo').map((c) => (
-                        <SelectItem key={c.id} value={c.id}>
-                          {c.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="status">Estado</Label>
-                  <Select
-                    value={newOrder.status}
-                    onValueChange={(value) => setNewOrder({ ...newOrder, status: value as Order['status'] })}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="pendiente">Pendiente</SelectItem>
-                      <SelectItem value="en_transito">En Tránsito</SelectItem>
-                      <SelectItem value="entregado">Entregado</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
-                Cancelar
-              </Button>
-              <Button onClick={handleCreateOrder} disabled={isSubmitting}>
-                {isSubmitting ? 'Creando...' : 'Crear Orden'}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      </div>
-
-      {/* Filters */}
-      <Card>
-        <CardContent className="pt-6">
-          <div className="flex flex-col sm:flex-row gap-4">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={18} />
-              <Input
-                placeholder="Buscar por número de orden, destino, OTN..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10"
-              />
-            </div>
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-full sm:w-48">
-                <Filter className="mr-2 h-4 w-4" />
-                <SelectValue placeholder="Filtrar por estado" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todos los estados</SelectItem>
-                <SelectItem value="pendiente">Pendiente</SelectItem>
-                <SelectItem value="en_transito">En Tránsito</SelectItem>
-                <SelectItem value="entregado">Entregado</SelectItem>
-                <SelectItem value="devolucion">Devolución</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Orders Table */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-lg font-semibold">
-            {filteredOrders.length} órdenes encontradas
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Origen</TableHead>
-                  <TableHead>Fecha / Hora</TableHead>
-                  <TableHead>Nº Orden</TableHead>
-                  <TableHead>Destino</TableHead>
-                  <TableHead className="text-right">Total</TableHead>
-                  <TableHead className="text-center">Productos</TableHead>
-                  <TableHead>OTN</TableHead>
-                  <TableHead>Transportista</TableHead>
-                  <TableHead>Estado</TableHead>
-                  <TableHead className="text-right">Acciones</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredOrders.map((order) => (
-                  <TableRow key={order.id} className="hover:bg-muted/50">
-                    <TableCell className="font-medium">{order.origin}</TableCell>
-                    <TableCell className="text-muted-foreground">
-                      <div className="text-sm">{order.date}</div>
-                      <div className="text-xs">{order.time}</div>
-                    </TableCell>
-                    <TableCell className="font-mono text-sm">{order.order_number}</TableCell>
-                    <TableCell>{order.destination}</TableCell>
-                    <TableCell className="text-right font-semibold">
-                      {formatPrice(Number(order.total))}
-                    </TableCell>
-                    <TableCell className="text-center">
-                      <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-muted text-sm font-medium">
-                        {order.products_count}
-                      </span>
-                    </TableCell>
-                    <TableCell className="font-mono text-xs text-muted-foreground">
-                      {order.otn}
-                    </TableCell>
-                    <TableCell>{getCarrierName(order.carrier_id)}</TableCell>
-                    <TableCell>
-                      <StatusBadge status={order.status} />
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon">
-                            <MoreHorizontal size={16} />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => handleOpenDetails(order)}>
-                            <Eye className="mr-2 h-4 w-4" />
-                            Ver Detalles
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleDownloadLabel(order)}>
-                            <Download className="mr-2 h-4 w-4" />
-                            Descargar Etiqueta
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleOpenChangeCarrier(order)}>
-                            <Truck className="mr-2 h-4 w-4" />
-                            Cambiar Transportista
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleUpdateStatus(order.id, 'entregado')}>
-                            <CheckCircle className="mr-2 h-4 w-4" />
-                            Marcar Entregado
-                          </DropdownMenuItem>
-                          <DropdownMenuItem 
-                            className="text-destructive"
-                            onClick={() => handleUpdateStatus(order.id, 'devolucion')}
-                          >
-                            <RotateCcw className="mr-2 h-4 w-4" />
-                            Procesar Devolución
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Order Details Dialog */}
-      <Dialog open={isDetailsDialogOpen} onOpenChange={setIsDetailsDialogOpen}>
-        <DialogContent className="sm:max-w-[500px]">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Package className="h-5 w-5" />
-              Detalles de Orden
-            </DialogTitle>
-            <DialogDescription>
-              Orden #{selectedOrder?.order_number}
-            </DialogDescription>
-          </DialogHeader>
-          {selectedOrder && (
-            <div className="space-y-4 py-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2 text-muted-foreground text-sm">
-                    <MapPin size={14} />
-                    Origen
-                  </div>
-                  <p className="font-semibold">{selectedOrder.origin}</p>
-                </div>
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2 text-muted-foreground text-sm">
-                    <MapPin size={14} />
-                    Destino
-                  </div>
-                  <p className="font-semibold">{selectedOrder.destination}</p>
-                </div>
-              </div>
-              
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2 text-muted-foreground text-sm">
-                    <Calendar size={14} />
-                    Fecha
-                  </div>
-                  <p className="font-semibold">{selectedOrder.date}</p>
-                </div>
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2 text-muted-foreground text-sm">
-                    <Clock size={14} />
-                    Hora
-                  </div>
-                  <p className="font-semibold">{selectedOrder.time}</p>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="bg-muted/50 rounded-lg p-3">
-                  <p className="text-sm text-muted-foreground">OTN</p>
-                  <p className="font-mono font-semibold">{selectedOrder.otn}</p>
-                </div>
-                <div className="bg-muted/50 rounded-lg p-3">
-                  <p className="text-sm text-muted-foreground">Transportista</p>
-                  <p className="font-semibold">{getCarrierName(selectedOrder.carrier_id)}</p>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="bg-muted/50 rounded-lg p-3">
-                  <p className="text-sm text-muted-foreground">Productos</p>
-                  <p className="text-2xl font-bold">{selectedOrder.products_count}</p>
-                </div>
-                <div className="bg-muted/50 rounded-lg p-3">
-                  <p className="text-sm text-muted-foreground">Total</p>
-                  <p className="text-2xl font-bold">{formatPrice(selectedOrder.total)}</p>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between bg-muted/50 rounded-lg p-3">
-                <span className="text-sm text-muted-foreground">Estado</span>
-                <StatusBadge status={selectedOrder.status} />
-              </div>
-            </div>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsDetailsDialogOpen(false)}>Cerrar</Button>
-            <Button onClick={() => selectedOrder && handleDownloadLabel(selectedOrder)}>
-              <Download className="mr-2 h-4 w-4" />
-              Descargar Etiqueta
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Change Carrier Dialog */}
-      <Dialog open={isCarrierDialogOpen} onOpenChange={setIsCarrierDialogOpen}>
-        <DialogContent className="sm:max-w-[400px]">
-          <DialogHeader>
-            <DialogTitle>Cambiar Transportista</DialogTitle>
-            <DialogDescription>
-              Orden #{selectedOrder?.order_number}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label>Transportista Actual</Label>
-              <div className="p-2 bg-muted rounded-md text-sm">
-                {selectedOrder ? getCarrierName(selectedOrder.carrier_id) : '-'}
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="new_carrier">Nuevo Transportista</Label>
-              <Select value={newCarrierId} onValueChange={setNewCarrierId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Seleccionar transportista" />
-                </SelectTrigger>
-                <SelectContent>
-                  {carriers.filter(c => c.status === 'activo').map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsCarrierDialogOpen(false)}>
-              Cancelar
-            </Button>
-            <Button onClick={handleChangeCarrier} disabled={isSubmitting}>
-              {isSubmitting ? 'Actualizando...' : 'Cambiar Transportista'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </div>
-  );
 };
 
 export default Orders;

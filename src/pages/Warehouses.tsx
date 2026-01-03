@@ -1,459 +1,184 @@
-import React, { useState } from 'react';
-import { useWarehouses, useProducts, dataService } from '@/hooks/useSupabaseData';
-import StatusBadge from '@/frontend/components/ui/StatusBadge';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Progress } from '@/components/ui/progress';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from '@/components/ui/dialog';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import { Label } from '@/components/ui/label';
-import { Warehouse, MapPin, Package, Plus, Settings, Eye } from 'lucide-react';
-import { Skeleton } from '@/components/ui/skeleton';
-import { toast } from 'sonner';
-import { useCurrency } from '@/context/CurrencyContext';
+import React, { useEffect, useState } from 'react';
+import DashboardLayout from "@/frontend/components/layout/DashboardLayout";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { MapPin, Box, Plus, Pencil, Trash2 } from "lucide-react";
+import { Progress } from "@/components/ui/progress";
+import { useApiData, Warehouse } from "@/hooks/useApiData";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { useToast } from "@/hooks/use-toast";
 
 const Warehouses: React.FC = () => {
-  const { data: warehouses, loading: warehousesLoading, refetch } = useWarehouses();
-  const { data: products } = useProducts();
-  const { formatPrice } = useCurrency();
-  const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [isDetailsDialogOpen, setIsDetailsDialogOpen] = useState(false);
-  const [isConfigDialogOpen, setIsConfigDialogOpen] = useState(false);
-  const [selectedWarehouse, setSelectedWarehouse] = useState<any>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [newWarehouse, setNewWarehouse] = useState({
-    name: '',
-    city: '',
-    capacity: 10000,
-    current_stock: 0,
-    status: 'activo' as 'activo' | 'inactivo',
-  });
-  const [editWarehouse, setEditWarehouse] = useState({
-    id: '',
-    name: '',
-    city: '',
-    capacity: 10000,
-    status: 'activo' as 'activo' | 'inactivo',
-  });
+    const { getWarehouses, createWarehouse, updateWarehouse, deleteWarehouse } = useApiData();
+    const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
+    const [loading, setLoading] = useState(true);
+    const { toast } = useToast();
 
-  const getWarehouseProducts = (warehouseId: string) => {
-    return products.filter(p => p.warehouse_id === warehouseId);
-  };
+    const [isDialogOpen, setIsDialogOpen] = useState(false);
+    const [editingWarehouse, setEditingWarehouse] = useState<Warehouse | null>(null);
+    const [formData, setFormData] = useState<Warehouse>({ name: '', city: '', capacity: 1000, currentStock: 0, status: 'activo' });
 
-  const handleOpenDetails = (warehouse: any) => {
-    setSelectedWarehouse(warehouse);
-    setIsDetailsDialogOpen(true);
-  };
+    const loadData = async () => {
+        setLoading(true);
+        const data = await getWarehouses();
+        setWarehouses(data);
+        setLoading(false);
+    };
 
-  const handleOpenConfig = (warehouse: any) => {
-    setEditWarehouse({
-      id: warehouse.id,
-      name: warehouse.name,
-      city: warehouse.city,
-      capacity: warehouse.capacity,
-      status: warehouse.status,
-    });
-    setIsConfigDialogOpen(true);
-  };
+    useEffect(() => { loadData(); }, []);
 
-  const handleUpdateWarehouse = async () => {
-    if (!editWarehouse.name || !editWarehouse.city) {
-      toast.error('Por favor completa los campos requeridos');
-      return;
-    }
+    const validateForm = () => {
+        if (!formData.name.trim()) {
+            toast({ variant: "destructive", title: "Error", description: "El nombre es obligatorio" });
+            return false;
+        }
+        if (formData.capacity <= 0) {
+            toast({ variant: "destructive", title: "Error", description: "La capacidad debe ser mayor a 0" });
+            return false;
+        }
+        return true;
+    };
 
-    setIsSubmitting(true);
-    try {
-      await dataService.updateWarehouse(editWarehouse.id, {
-        name: editWarehouse.name,
-        city: editWarehouse.city,
-        capacity: editWarehouse.capacity,
-        status: editWarehouse.status,
-      });
-      toast.success('Almacén actualizado correctamente');
-      setIsConfigDialogOpen(false);
-      refetch();
-    } catch (error) {
-      toast.error('Error al actualizar el almacén');
-      console.error(error);
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
+    const handleSubmit = async () => {
+        if (!validateForm()) return;
+        try {
+            if (editingWarehouse && editingWarehouse.id) {
+                await updateWarehouse(editingWarehouse.id, formData);
+            } else {
+                await createWarehouse(formData);
+            }
+            setIsDialogOpen(false);
+            setEditingWarehouse(null);
+            setFormData({ name: '', city: '', capacity: 1000, currentStock: 0, status: 'activo' });
+            loadData();
+        } catch (e) { console.error(e); }
+    };
 
-  const handleCreateWarehouse = async () => {
-    if (!newWarehouse.name || !newWarehouse.city) {
-      toast.error('Por favor completa los campos requeridos');
-      return;
-    }
+    const handleEdit = (w: Warehouse) => {
+        setEditingWarehouse(w);
+        setFormData(w);
+        setIsDialogOpen(true);
+    };
 
-    setIsSubmitting(true);
-    try {
-      await dataService.createWarehouse({
-        name: newWarehouse.name,
-        city: newWarehouse.city,
-        capacity: newWarehouse.capacity,
-        current_stock: newWarehouse.current_stock,
-        status: newWarehouse.status,
-      });
-      toast.success('Almacén creado correctamente');
-      setIsDialogOpen(false);
-      setNewWarehouse({
-        name: '',
-        city: '',
-        capacity: 10000,
-        current_stock: 0,
-        status: 'activo',
-      });
-      refetch();
-    } catch (error) {
-      toast.error('Error al crear el almacén');
-      console.error(error);
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
+    const handleDelete = async (id: string) => {
+        if(confirm("¿Eliminar almacén?")) {
+            await deleteWarehouse(id);
+            loadData();
+        }
+    };
 
-  if (warehousesLoading) {
     return (
-      <div className="space-y-6 animate-fade-in">
-        <div className="flex justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-foreground">Almacenes</h1>
-            <p className="text-muted-foreground">Gestiona tus centros de distribución</p>
-          </div>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-          {[...Array(4)].map((_, i) => (
-            <Skeleton key={i} className="h-64 rounded-lg" />
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-6 animate-fade-in">
-      {/* Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">Almacenes</h1>
-          <p className="text-muted-foreground">Gestiona tus centros de distribución</p>
-        </div>
-        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-          <DialogTrigger asChild>
-            <Button className="gradient-inka text-primary-foreground">
-              <Plus className="mr-2 h-4 w-4" />
-              Agregar Almacén
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="sm:max-w-[425px]">
-            <DialogHeader>
-              <DialogTitle>Agregar Nuevo Almacén</DialogTitle>
-              <DialogDescription>
-                Configura un nuevo centro de distribución.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="grid gap-4 py-4">
-              <div className="space-y-2">
-                <Label htmlFor="name">Nombre *</Label>
-                <Input
-                  id="name"
-                  placeholder="Ej: Almacén Central"
-                  value={newWarehouse.name}
-                  onChange={(e) => setNewWarehouse({ ...newWarehouse, name: e.target.value })}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="city">Ciudad *</Label>
-                <Input
-                  id="city"
-                  placeholder="Ej: Madrid"
-                  value={newWarehouse.city}
-                  onChange={(e) => setNewWarehouse({ ...newWarehouse, city: e.target.value })}
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="capacity">Capacidad (unidades)</Label>
-                  <Input
-                    id="capacity"
-                    type="number"
-                    min="0"
-                    value={newWarehouse.capacity}
-                    onChange={(e) => setNewWarehouse({ ...newWarehouse, capacity: parseInt(e.target.value) || 0 })}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="current_stock">Stock Actual</Label>
-                  <Input
-                    id="current_stock"
-                    type="number"
-                    min="0"
-                    value={newWarehouse.current_stock}
-                    onChange={(e) => setNewWarehouse({ ...newWarehouse, current_stock: parseInt(e.target.value) || 0 })}
-                  />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="status">Estado</Label>
-                <Select
-                  value={newWarehouse.status}
-                  onValueChange={(value) => setNewWarehouse({ ...newWarehouse, status: value as 'activo' | 'inactivo' })}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="activo">Activo</SelectItem>
-                    <SelectItem value="inactivo">Inactivo</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
-                Cancelar
-              </Button>
-              <Button onClick={handleCreateWarehouse} disabled={isSubmitting}>
-                {isSubmitting ? 'Creando...' : 'Crear Almacén'}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      </div>
-
-      {/* Warehouses Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-        {warehouses.map((warehouse) => {
-          const capacityPercentage = warehouse.capacity > 0 
-            ? (warehouse.current_stock / warehouse.capacity) * 100 
-            : 0;
-          const warehouseProducts = getWarehouseProducts(warehouse.id);
-          
-          return (
-            <Card key={warehouse.id} className="hover:shadow-card-hover transition-all duration-300">
-              <CardHeader className="pb-3">
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center">
-                      <Warehouse className="h-6 w-6 text-primary" />
-                    </div>
+        <DashboardLayout>
+            <div className="space-y-6 animate-fade-in">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                     <div>
-                      <CardTitle className="text-lg">{warehouse.name}</CardTitle>
-                      <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                        <MapPin size={14} />
-                        {warehouse.city}
-                      </div>
+                        <h1 className="text-3xl font-bold tracking-tight text-gray-900 dark:text-gray-100">Almacenes</h1>
+                        <p className="text-muted-foreground">Gestión de centros de distribución.</p>
                     </div>
-                  </div>
-                  <StatusBadge status={warehouse.status} showIcon={false} />
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {/* Capacity Progress */}
-                <div>
-                  <div className="flex justify-between text-sm mb-2">
-                    <span className="text-muted-foreground">Capacidad utilizada</span>
-                    <span className="font-medium">{capacityPercentage.toFixed(1)}%</span>
-                  </div>
-                  <Progress 
-                    value={capacityPercentage} 
-                    className="h-2"
-                  />
-                  <div className="flex justify-between text-xs text-muted-foreground mt-1">
-                    <span>{warehouse.current_stock.toLocaleString()} unidades</span>
-                    <span>de {warehouse.capacity.toLocaleString()}</span>
-                  </div>
+
+                    <Dialog open={isDialogOpen} onOpenChange={open => { setIsDialogOpen(open); if(!open) setEditingWarehouse(null); }}>
+                        <DialogTrigger asChild>
+                            <Button className="bg-primary hover:bg-primary/90 shadow-lg" onClick={() => setFormData({ name: '', city: '', capacity: 1000, currentStock: 0, status: 'activo' })}>
+                                <Plus className="mr-2 h-4 w-4" /> Nuevo Almacén
+                            </Button>
+                        </DialogTrigger>
+                        <DialogContent>
+                            <DialogHeader>
+                                <DialogTitle>{editingWarehouse ? 'Editar' : 'Nuevo'} Almacén</DialogTitle>
+                                <DialogDescription>Detalles de ubicación y capacidad.</DialogDescription>
+                            </DialogHeader>
+                            <div className="grid gap-4 py-4">
+                                <div className="space-y-2">
+                                    <Label>Nombre del Almacén *</Label>
+                                    <Input value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} placeholder="Ej: Almacén Norte" />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>Ciudad / Ubicación</Label>
+                                    <Input value={formData.city} onChange={e => setFormData({...formData, city: e.target.value})} placeholder="Ej: Lima" />
+                                </div>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="space-y-2">
+                                        <Label>Capacidad Total</Label>
+                                        <Input type="number" min="1" value={formData.capacity} onChange={e => setFormData({...formData, capacity: parseInt(e.target.value)})} />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label>Stock Inicial</Label>
+                                        <Input type="number" min="0" value={formData.currentStock} onChange={e => setFormData({...formData, currentStock: parseInt(e.target.value)})} />
+                                    </div>
+                                </div>
+                            </div>
+                            <DialogFooter>
+                                <Button onClick={handleSubmit}>Guardar</Button>
+                            </DialogFooter>
+                        </DialogContent>
+                    </Dialog>
                 </div>
 
-                {/* Stats */}
-                <div className="grid grid-cols-2 gap-4 pt-2">
-                  <div className="bg-muted/50 rounded-lg p-3">
-                    <div className="flex items-center gap-2 text-muted-foreground mb-1">
-                      <Package size={14} />
-                      <span className="text-xs">Productos</span>
-                    </div>
-                    <p className="text-xl font-bold">{warehouseProducts.length}</p>
-                  </div>
-                  <div className="bg-muted/50 rounded-lg p-3">
-                    <div className="flex items-center gap-2 text-muted-foreground mb-1">
-                      <span className="text-xs">Stock Total</span>
-                    </div>
-                    <p className="text-xl font-bold">
-                      {warehouseProducts.reduce((acc, p) => acc + p.stock, 0).toLocaleString()}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Actions */}
-                <div className="flex gap-2 pt-2">
-                  <Button variant="outline" className="flex-1" size="sm" onClick={() => handleOpenDetails(warehouse)}>
-                    <Eye className="mr-2 h-4 w-4" />
-                    Ver Detalles
-                  </Button>
-                  <Button variant="ghost" size="icon" onClick={() => handleOpenConfig(warehouse)}>
-                    <Settings size={16} />
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          );
-        })}
-      </div>
-
-      {/* Details Dialog */}
-      <Dialog open={isDetailsDialogOpen} onOpenChange={setIsDetailsDialogOpen}>
-        <DialogContent className="sm:max-w-[600px] max-h-[80vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Warehouse className="h-5 w-5" />
-              {selectedWarehouse?.name}
-            </DialogTitle>
-            <DialogDescription>
-              <span className="flex items-center gap-1">
-                <MapPin size={14} />
-                {selectedWarehouse?.city}
-              </span>
-            </DialogDescription>
-          </DialogHeader>
-          {selectedWarehouse && (
-            <div className="space-y-4 py-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="bg-muted/50 rounded-lg p-4">
-                  <p className="text-sm text-muted-foreground">Capacidad Total</p>
-                  <p className="text-2xl font-bold">{selectedWarehouse.capacity.toLocaleString()}</p>
-                </div>
-                <div className="bg-muted/50 rounded-lg p-4">
-                  <p className="text-sm text-muted-foreground">Stock Actual</p>
-                  <p className="text-2xl font-bold">{selectedWarehouse.current_stock.toLocaleString()}</p>
-                </div>
-              </div>
-              
-              <div>
-                <h4 className="font-semibold mb-2">Productos en este almacén</h4>
-                {getWarehouseProducts(selectedWarehouse.id).length === 0 ? (
-                  <p className="text-muted-foreground text-sm">No hay productos en este almacén</p>
+                {loading ? (
+                    <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">{[...Array(3)].map((_, i) => <Skeleton key={i} className="h-64 w-full rounded-xl" />)}</div>
                 ) : (
-                  <div className="border rounded-lg overflow-hidden">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>SKU</TableHead>
-                          <TableHead>Producto</TableHead>
-                          <TableHead className="text-right">Stock</TableHead>
-                          <TableHead className="text-right">Precio</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {getWarehouseProducts(selectedWarehouse.id).map(product => (
-                          <TableRow key={product.id}>
-                            <TableCell className="font-mono text-sm">{product.sku}</TableCell>
-                            <TableCell>{product.name}</TableCell>
-                            <TableCell className="text-right">{product.stock}</TableCell>
-                            <TableCell className="text-right">{formatPrice(product.price)}</TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsDetailsDialogOpen(false)}>Cerrar</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+                    <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+                        {warehouses.map((warehouse) => {
+                            const occupancy = warehouse.capacity > 0 ? (warehouse.currentStock / warehouse.capacity) * 100 : 0;
+                            const isFull = occupancy >= 90;
 
-      {/* Config Dialog */}
-      <Dialog open={isConfigDialogOpen} onOpenChange={setIsConfigDialogOpen}>
-        <DialogContent className="sm:max-w-[425px]">
-          <DialogHeader>
-            <DialogTitle>Configurar Almacén</DialogTitle>
-            <DialogDescription>
-              Modifica la configuración del almacén.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="edit_name">Nombre *</Label>
-              <Input
-                id="edit_name"
-                value={editWarehouse.name}
-                onChange={(e) => setEditWarehouse({ ...editWarehouse, name: e.target.value })}
-              />
+                            return (
+                                <Card key={warehouse.id} className="shadow-sm hover:shadow-md transition-all duration-300 border-0 bg-white dark:bg-gray-800 group relative">
+                                    <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleEdit(warehouse)}><Pencil className="h-3 w-3"/></Button>
+                                        <Button variant="ghost" size="icon" className="h-7 w-7 text-red-500" onClick={() => warehouse.id && handleDelete(warehouse.id)}><Trash2 className="h-3 w-3"/></Button>
+                                    </div>
+
+                                    <CardHeader className="pb-3">
+                                        <div className="flex justify-between items-start">
+                                            <div className="space-y-1">
+                                                <CardTitle className="flex items-center gap-2 text-lg">
+                                                    <div className="p-2 bg-primary/10 rounded-lg group-hover:bg-primary/20 transition-colors">
+                                                        <Box className="h-5 w-5 text-primary" />
+                                                    </div>
+                                                    {warehouse.name}
+                                                </CardTitle>
+                                                <CardDescription className="flex items-center gap-1.5 text-xs font-medium">
+                                                    <MapPin className="h-3 w-3" /> {warehouse.city}
+                                                </CardDescription>
+                                            </div>
+                                        </div>
+                                    </CardHeader>
+                                    <CardContent>
+                                        <div className="space-y-6">
+                                            <div className="space-y-2">
+                                                <div className="flex justify-between text-sm">
+                                                    <span className="text-muted-foreground">Ocupación</span>
+                                                    <span className={`font-bold ${isFull ? 'text-red-600' : 'text-primary'}`}>
+                            {occupancy.toFixed(1)}%
+                          </span>
+                                                </div>
+                                                <Progress value={occupancy} className="h-2 bg-slate-100 dark:bg-gray-700" />
+                                            </div>
+
+                                            <div className="grid grid-cols-2 gap-4 pt-2 border-t border-slate-50 dark:border-gray-700">
+                                                <div className="space-y-1">
+                                                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold">Capacidad</p>
+                                                    <p className="text-xl font-bold text-slate-700 dark:text-gray-200">{warehouse.capacity.toLocaleString()}</p>
+                                                </div>
+                                                <div className="space-y-1">
+                                                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold">Stock Actual</p>
+                                                    <p className="text-xl font-bold text-slate-700 dark:text-gray-200">{warehouse.currentStock.toLocaleString()}</p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </CardContent>
+                                </Card>
+                            );
+                        })}
+                    </div>
+                )}
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="edit_city">Ciudad *</Label>
-              <Input
-                id="edit_city"
-                value={editWarehouse.city}
-                onChange={(e) => setEditWarehouse({ ...editWarehouse, city: e.target.value })}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="edit_capacity">Capacidad (unidades)</Label>
-              <Input
-                id="edit_capacity"
-                type="number"
-                min="0"
-                value={editWarehouse.capacity}
-                onChange={(e) => setEditWarehouse({ ...editWarehouse, capacity: parseInt(e.target.value) || 0 })}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="edit_status">Estado</Label>
-              <Select
-                value={editWarehouse.status}
-                onValueChange={(value) => setEditWarehouse({ ...editWarehouse, status: value as 'activo' | 'inactivo' })}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="activo">Activo</SelectItem>
-                  <SelectItem value="inactivo">Inactivo</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsConfigDialogOpen(false)}>
-              Cancelar
-            </Button>
-            <Button onClick={handleUpdateWarehouse} disabled={isSubmitting}>
-              {isSubmitting ? 'Guardando...' : 'Guardar Cambios'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </div>
-  );
+        </DashboardLayout>
+    );
 };
 
 export default Warehouses;

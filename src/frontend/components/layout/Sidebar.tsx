@@ -1,137 +1,240 @@
-import React, { useState } from 'react';
-import { NavLink, useLocation } from 'react-router-dom';
-import { 
-  LayoutDashboard, 
-  Package, 
-  Warehouse, 
-  Truck, 
-  ClipboardList, 
-  BarChart3, 
-  Users, 
-  Settings,
-  ChevronLeft,
-  ChevronRight,
-  LogOut
-} from 'lucide-react';
-import { cn } from '@/lib/utils';
-import { useAuth } from '@/frontend/context/AuthContext';
-import superinkaLogo from '@/assets/superinka-logo.png';
+import { useState } from "react";
+import { Link, useLocation } from "react-router-dom";
+import { cn } from "@/lib/utils";
+import {
+    LayoutDashboard,
+    Package,
+    ShoppingCart,
+    Truck,
+    Users,
+    Settings,
+    FileText,
+    Warehouse,
+    LogOut,
+    X,
+    Store,
+    Building2,
+    ClipboardList,
+    Bike,
+    Sofa,
+    ChevronDown,
+    ChevronRight,
+    LucideIcon
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { useAuth } from "@/frontend/context/AuthContext";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
-interface NavItem {
-  icon: React.ElementType;
-  label: string;
-  path: string;
-  requiredPermission?: string;
+interface SidebarProps {
+    isOpen: boolean;
+    onClose: () => void;
 }
 
-const navItems: NavItem[] = [
-  { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard' },
-  { icon: Package, label: 'Inventarios', path: '/inventarios' },
-  { icon: Warehouse, label: 'Almacenes', path: '/almacenes' },
-  { icon: ClipboardList, label: 'Órdenes', path: '/ordenes' },
-  { icon: Truck, label: 'Transportistas', path: '/transportistas' },
-  { icon: BarChart3, label: 'Reportes', path: '/reportes', requiredPermission: 'canViewReports' },
-  { icon: Users, label: 'Usuarios', path: '/usuarios', requiredPermission: 'canManageUsers' },
-  { icon: Settings, label: 'Configuración', path: '/configuracion' },
-];
+interface MenuChild {
+    label: string;
+    path: string;
+    icon: LucideIcon;
+}
 
-const Sidebar: React.FC = () => {
-  const [collapsed, setCollapsed] = useState(false);
-  const location = useLocation();
-  const { user, logout, permissions } = useAuth();
+interface MenuItem {
+    type?: 'group';
+    label: string;
+    path?: string;
+    icon: LucideIcon;
+    children?: MenuChild[];
+}
 
-  const filteredNavItems = navItems.filter(item => {
-    if (!item.requiredPermission) return true;
-    return permissions?.[item.requiredPermission as keyof typeof permissions];
-  });
+const Sidebar = ({ isOpen, onClose }: SidebarProps) => {
+    const location = useLocation();
+    const { logout, user } = useAuth();
 
-  return (
-    <aside 
-      className={cn(
-        "h-screen gradient-sidebar flex flex-col transition-all duration-300 ease-in-out border-r border-sidebar-border",
-        collapsed ? "w-16" : "w-64"
-      )}
-    >
-      {/* Logo Section */}
-      <div className="p-4 flex items-center justify-between border-b border-sidebar-border">
-        {!collapsed && (
-          <img 
-            src={superinkaLogo} 
-            alt="SuperInka" 
-            className="h-10 object-contain"
-          />
-        )}
-        <button
-          onClick={() => setCollapsed(!collapsed)}
-          className="p-2 rounded-lg hover:bg-sidebar-accent transition-colors text-sidebar-foreground"
-        >
-          {collapsed ? <ChevronRight size={20} /> : <ChevronLeft size={20} />}
-        </button>
-      </div>
+    // Estado para el menú desplegable de inventario
+    const [isInventoryOpen, setIsInventoryOpen] = useState(true);
 
-      {/* Navigation */}
-      <nav className="flex-1 py-4 px-2 space-y-1 overflow-y-auto">
-        {filteredNavItems.map((item) => {
-          const Icon = item.icon;
-          const isActive = location.pathname === item.path;
-          
-          return (
-            <NavLink
-              key={item.path}
-              to={item.path}
-              className={cn(
-                "flex items-center gap-3 px-3 py-3 rounded-lg transition-all duration-200 group relative",
-                isActive 
-                  ? "bg-primary text-primary-foreground shadow-inka" 
-                  : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-              )}
+    // Normalizar rol
+    const role = user?.role?.toLowerCase().replace('role_', '') || 'operador';
+
+    const getMenuItems = () => {
+        const items: MenuItem[] = [];
+
+        // 1. VISTA CLIENTE O HELADERO
+        // CORRECCIÓN: Agregamos 'heladero' aquí
+        if (role === 'cliente' || role === 'heladero') {
+            return [
+                { icon: Store, label: "Catálogo", path: "/shop" },
+                { icon: ClipboardList, label: "Mi Carga Diaria", path: "/my-load" },
+                { icon: ShoppingCart, label: "Mis Pedidos", path: "/orders" },
+                { icon: Settings, label: "Configuración", path: "/configuration" }
+            ];
+        }
+
+        // 2. VISTAS DE GESTIÓN (Staff + Super Admin)
+
+        // Dashboard: Super Admin, Admin, Supervisor
+        if (['super_admin', 'admin', 'supervisor'].includes(role)) {
+            items.push({ icon: LayoutDashboard, label: "Dashboard", path: "/dashboard" });
+        }
+
+        // Gestión SaaS (Solo Super Admin)
+        if (role === 'super_admin') {
+            items.push({ icon: Building2, label: "Empresas", path: "/companies" });
+            items.push({ icon: Users, label: "Usuarios Globales", path: "/users" });
+        }
+
+        // GRUPO INVENTARIO (Desplegable)
+        if (['super_admin', 'admin', 'supervisor', 'operador'].includes(role)) {
+            items.push({
+                type: 'group',
+                label: 'Inventario & Activos',
+                icon: Package,
+                children: [
+                    { label: "Productos", path: "/inventory", icon: Package },
+                    { label: "Activos Clientes", path: "/assets/client", icon: Bike },
+                    { label: "Activos Empresa", path: "/assets/company", icon: Sofa }
+                ]
+            });
+        }
+
+        // OPERACIONES
+        if (['super_admin', 'admin', 'supervisor', 'operador'].includes(role)) {
+            items.push({ icon: ClipboardList, label: "Despachos", path: "/dispatch" });
+            items.push({ icon: FileText, label: "Liquidación", path: "/settlement" });
+            items.push({ icon: ShoppingCart, label: "Gestión Pedidos", path: "/orders" });
+            items.push({ icon: Warehouse, label: "Almacenes", path: "/warehouses" });
+        }
+
+        // GESTIÓN DE PERSONAL
+        if (['super_admin', 'admin', 'supervisor'].includes(role)) {
+            items.push({ icon: Truck, label: "Transportistas", path: "/carriers" });
+            items.push({ icon: Users, label: "Heladeros/Clientes", path: "/sellers" });
+        }
+
+        // ADMINISTRACIÓN
+        if (role === 'admin') {
+            items.push({ icon: Users, label: "Usuarios Staff", path: "/users" });
+        }
+
+        // REPORTES
+        if (['super_admin', 'admin', 'supervisor', 'operador'].includes(role)) {
+            items.push({ icon: FileText, label: "Reportes", path: "/reports" });
+        }
+
+        // CONFIGURACIÓN (Para todos)
+        items.push({ icon: Settings, label: "Configuración", path: "/configuration" });
+
+        return items;
+    };
+
+    const menuItems = getMenuItems();
+
+    return (
+        <>
+            {/* Overlay para móviles */}
+            {isOpen && (
+                <div
+                    className="fixed inset-0 z-40 bg-black/50 md:hidden"
+                    onClick={onClose}
+                />
+            )}
+
+            <aside
+                className={cn(
+                    "fixed inset-y-0 left-0 z-50 w-64 bg-white dark:bg-gray-900 border-r dark:border-gray-800 transform transition-transform duration-200 ease-in-out md:relative md:translate-x-0 flex flex-col",
+                    isOpen ? "translate-x-0" : "-translate-x-full"
+                )}
             >
-              <Icon size={20} className={cn(isActive && "animate-pulse-inka")} />
-              {!collapsed && (
-                <span className="font-medium text-sm">{item.label}</span>
-              )}
-              {collapsed && (
-                <div className="absolute left-full ml-2 px-2 py-1 bg-card text-card-foreground rounded-md text-sm font-medium opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all whitespace-nowrap z-50 shadow-lg">
-                  {item.label}
+                <div className="flex items-center justify-between h-16 px-6 border-b dark:border-gray-800 shrink-0">
+                    <div className="flex items-center gap-2">
+                        <img src="/superinka-logo.png" alt="Logo" className="h-8 w-auto" />
+                        <span className="font-bold text-lg text-primary">SuperInka</span>
+                    </div>
+                    <Button variant="ghost" size="icon" className="md:hidden" onClick={onClose}>
+                        <X className="h-5 w-5" />
+                    </Button>
                 </div>
-              )}
-            </NavLink>
-          );
-        })}
-      </nav>
 
-      {/* User Section */}
-      <div className="p-4 border-t border-sidebar-border">
-        <div className={cn(
-          "flex items-center gap-3",
-          collapsed && "justify-center"
-        )}>
-          <div className="w-10 h-10 rounded-full gradient-inka flex items-center justify-center text-primary-foreground font-bold text-sm">
-            {user?.name.charAt(0).toUpperCase()}
-          </div>
-          {!collapsed && (
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-sidebar-foreground truncate">
-                {user?.name}
-              </p>
-              <p className="text-xs text-muted-foreground capitalize">
-                {user?.role}
-              </p>
-            </div>
-          )}
-          {!collapsed && (
-            <button
-              onClick={logout}
-              className="p-2 rounded-lg hover:bg-sidebar-accent transition-colors text-sidebar-foreground hover:text-destructive"
-              title="Cerrar sesión"
-            >
-              <LogOut size={18} />
-            </button>
-          )}
-        </div>
-      </div>
-    </aside>
-  );
+                <nav className="flex-1 overflow-y-auto p-4 space-y-2">
+                    {menuItems.map((item, idx) => {
+                        // Renderizar Grupo Desplegable
+                        if (item.type === 'group') {
+                            return (
+                                <Collapsible
+                                    key={idx}
+                                    open={isInventoryOpen}
+                                    onOpenChange={setIsInventoryOpen}
+                                    className="space-y-1"
+                                >
+                                    <CollapsibleTrigger asChild>
+                                        <Button variant="ghost" className="w-full justify-between font-medium hover:bg-slate-100 dark:hover:bg-gray-800">
+                                            <div className="flex items-center gap-3">
+                                                <item.icon className="h-4 w-4" />
+                                                {item.label}
+                                            </div>
+                                            {isInventoryOpen ? <ChevronDown className="h-4 w-4"/> : <ChevronRight className="h-4 w-4"/>}
+                                        </Button>
+                                    </CollapsibleTrigger>
+                                    <CollapsibleContent className="pl-4 space-y-1 data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down">
+                                        {item.children?.map((child: MenuChild) => (
+                                            <Link
+                                                key={child.path}
+                                                to={child.path}
+                                                className={cn(
+                                                    "flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors",
+                                                    location.pathname === child.path
+                                                        ? "bg-primary/10 text-primary font-medium"
+                                                        : "text-muted-foreground hover:bg-slate-100 dark:hover:bg-gray-800 hover:text-foreground"
+                                                )}
+                                                onClick={() => onClose()}
+                                            >
+                                                <child.icon className="h-4 w-4 opacity-70" />
+                                                {child.label}
+                                            </Link>
+                                        ))}
+                                    </CollapsibleContent>
+                                </Collapsible>
+                            );
+                        }
+
+                        // Renderizar Item Normal
+                        const Icon = item.icon;
+                        const isActive = location.pathname === item.path;
+
+                        return (
+                            <Link
+                                key={item.path}
+                                to={item.path}
+                                className={cn(
+                                    "flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors",
+                                    isActive
+                                        ? "bg-primary text-primary-foreground shadow-sm"
+                                        : "text-muted-foreground hover:bg-slate-100 dark:hover:bg-gray-800 hover:text-foreground"
+                                )}
+                                onClick={() => onClose()}
+                            >
+                                <Icon className="h-4 w-4" />
+                                {item.label}
+                            </Link>
+                        );
+                    })}
+                </nav>
+
+                <div className="p-4 border-t dark:border-gray-800 shrink-0">
+                    <div className="mb-4 px-2">
+                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Rol Actual</p>
+                        <p className="text-sm font-bold capitalize text-primary">{role.replace('_', ' ')}</p>
+                    </div>
+                    <Button
+                        variant="outline"
+                        className="w-full justify-start text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/30 border-red-200 dark:border-red-900/50"
+                        onClick={logout}
+                    >
+                        <LogOut className="mr-2 h-4 w-4" />
+                        Cerrar Sesión
+                    </Button>
+                </div>
+            </aside>
+        </>
+    );
 };
 
 export default Sidebar;

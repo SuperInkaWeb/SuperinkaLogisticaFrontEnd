@@ -1,40 +1,32 @@
-import React from 'react';
-import { Outlet, Navigate } from 'react-router-dom';
-import Sidebar from './Sidebar';
-import Header from './Header';
-import NotificationToast from '../ui/NotificationToast';
-import { useAuth } from '@/frontend/context/AuthContext';
+import { useState, ReactNode } from "react";
+import Sidebar from "./Sidebar";
+import Header from "./Header";
 
-const DashboardLayout: React.FC = () => {
-  const { isAuthenticated, isLoading } = useAuth();
+interface DashboardLayoutProps {
+    children: ReactNode; // Agregamos explícitamente esta propiedad
+}
 
-  if (isLoading) {
+const DashboardLayout = ({ children }: DashboardLayoutProps) => {
+    const [sidebarOpen, setSidebarOpen] = useState(false);
+
     return (
-      <div className="h-screen w-full flex items-center justify-center bg-background">
-        <div className="flex flex-col items-center gap-4">
-          <div className="w-12 h-12 rounded-full gradient-inka animate-pulse" />
-          <p className="text-muted-foreground">Cargando...</p>
+        <div className="flex h-screen bg-gray-50 dark:bg-gray-900 overflow-hidden">
+            {/* Sidebar para Desktop y Mobile */}
+            <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+
+            <div className="flex-1 flex flex-col overflow-hidden">
+                {/* Header con botón para abrir sidebar en mobile */}
+                <Header onMenuClick={() => setSidebarOpen(true)} />
+
+                {/* Contenido principal scrolleable */}
+                <main className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8">
+                    <div className="max-w-7xl mx-auto w-full">
+                        {children}
+                    </div>
+                </main>
+            </div>
         </div>
-      </div>
     );
-  }
-
-  if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
-  }
-
-  return (
-    <div className="flex h-screen w-full bg-background overflow-hidden">
-      <Sidebar />
-      <div className="flex-1 flex flex-col min-w-0">
-        <Header />
-        <main className="flex-1 overflow-y-auto p-6">
-          <Outlet />
-        </main>
-      </div>
-      <NotificationToast />
-    </div>
-  );
 };
 
 export default DashboardLayout;

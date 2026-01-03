@@ -1,657 +1,411 @@
-import React, { useState } from 'react';
-import { useProducts, useWarehouses, dataService } from '@/hooks/useSupabaseData';
-import StatusBadge from '@/frontend/components/ui/StatusBadge';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import React, { useEffect, useState } from 'react';
+import DashboardLayout from "@/frontend/components/layout/DashboardLayout";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Search, Plus, MoreHorizontal, Copy, Pencil, Trash2, ChevronLeft, ChevronRight, Box, MapPin } from "lucide-react";
+import StatusBadge from "@/frontend/components/ui/StatusBadge";
+import { useApiData, Product, Warehouse } from "@/hooks/useApiData";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useCurrency } from "@/context/CurrencyContext";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from '@/components/ui/dialog';
-import { Label } from '@/components/ui/label';
-import { Search, MoreHorizontal, Edit, ArrowRightLeft, Trash2, Plus, Filter, Package } from 'lucide-react';
-import { Skeleton } from '@/components/ui/skeleton';
-import { toast } from 'sonner';
-import { useCurrency } from '@/context/CurrencyContext';
+    DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useToast } from "@/hooks/use-toast";
 
 const Inventory: React.FC = () => {
-  const { data: products, loading: productsLoading, refetch } = useProducts();
-  const { data: warehouses } = useWarehouses();
-  const { formatPrice } = useCurrency();
-  const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<string>('all');
-  const [warehouseFilter, setWarehouseFilter] = useState<string>('all');
-  const [categoryFilter, setCategoryFilter] = useState<string>('all');
-  const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
-  const [isMoveDialogOpen, setIsMoveDialogOpen] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [selectedProduct, setSelectedProduct] = useState<any>(null);
-  const [newProduct, setNewProduct] = useState({
-    sku: '',
-    name: '',
-    category: '',
-    stock: 0,
-    min_stock: 10,
-    warehouse_id: '',
-    price: 0,
-    status: 'normal' as 'normal' | 'bajo' | 'agotado',
-    image_url: null as string | null,
-  });
-  const [editProduct, setEditProduct] = useState({
-    id: '',
-    sku: '',
-    name: '',
-    category: '',
-    stock: 0,
-    min_stock: 10,
-    warehouse_id: '',
-    price: 0,
-  });
-  const [moveToWarehouse, setMoveToWarehouse] = useState('');
+    const { getProducts, getWarehouses, createProduct, updateProduct, deleteProduct } = useApiData();
+    const { formatMoney } = useCurrency();
+    const { toast } = useToast();
 
-  const categories = [...new Set(products.map(p => p.category))];
+    const [products, setProducts] = useState<Product[]>([]);
+    const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [searchTerm, setSearchTerm] = useState("");
+    const [currentPage, setCurrentPage] = useState(1);
+    const itemsPerPage = 10;
 
-  const filteredProducts = products.filter(product => {
-    const matchesSearch = 
-      product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      product.sku.toLowerCase().includes(searchQuery.toLowerCase());
-    
-    const matchesStatus = statusFilter === 'all' || product.status === statusFilter;
-    const matchesWarehouse = warehouseFilter === 'all' || product.warehouse_id === warehouseFilter;
-    const matchesCategory = categoryFilter === 'all' || product.category === categoryFilter;
-    
-    return matchesSearch && matchesStatus && matchesWarehouse && matchesCategory;
-  });
+    const [isCreateOpen, setIsCreateOpen] = useState(false);
+    const [isEditOpen, setIsEditOpen] = useState(false);
+    const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
 
-  const getWarehouseName = (warehouseId: string | null) => {
-    if (!warehouseId) return '-';
-    return warehouses.find(w => w.id === warehouseId)?.name || '-';
-  };
-
-  const handleDeleteProduct = async (productId: string) => {
-    try {
-      await dataService.deleteProduct(productId);
-      toast.success('Producto eliminado correctamente');
-      refetch();
-    } catch (error) {
-      toast.error('Error al eliminar el producto');
-    }
-  };
-
-  const handleOpenEdit = (product: any) => {
-    setEditProduct({
-      id: product.id,
-      sku: product.sku,
-      name: product.name,
-      category: product.category,
-      stock: product.stock,
-      min_stock: product.min_stock,
-      warehouse_id: product.warehouse_id || '',
-      price: product.price,
+    const [formData, setFormData] = useState<Partial<Product>>({
+        name: '', sku: '', category: '', stock: 0, price: 0, status: 'normal', minStock: 5,
+        volumeFactor: 1.0, warehouseId: ''
     });
-    setIsEditDialogOpen(true);
-  };
 
-  const handleUpdateProduct = async () => {
-    if (!editProduct.sku || !editProduct.name || !editProduct.category) {
-      toast.error('Por favor completa los campos requeridos');
-      return;
-    }
+    const loadData = async () => {
+        setLoading(true);
+        try {
+            const [productsData, warehousesData] = await Promise.all([
+                getProducts(),
+                getWarehouses()
+            ]);
+            setProducts(Array.isArray(productsData) ? productsData : []);
+            setWarehouses(Array.isArray(warehousesData) ? warehousesData : []);
+        } catch (error) { setProducts([]); }
+        finally { setLoading(false); }
+    };
 
-    setIsSubmitting(true);
-    try {
-      let status: 'normal' | 'bajo' | 'agotado' = 'normal';
-      if (editProduct.stock === 0) {
-        status = 'agotado';
-      } else if (editProduct.stock < editProduct.min_stock) {
-        status = 'bajo';
-      }
+    useEffect(() => { loadData(); }, []);
 
-      await dataService.updateProduct(editProduct.id, {
-        sku: editProduct.sku,
-        name: editProduct.name,
-        category: editProduct.category,
-        stock: editProduct.stock,
-        min_stock: editProduct.min_stock,
-        warehouse_id: editProduct.warehouse_id || null,
-        price: editProduct.price,
-        status,
-      });
-      toast.success('Producto actualizado correctamente');
-      setIsEditDialogOpen(false);
-      refetch();
-    } catch (error) {
-      toast.error('Error al actualizar el producto');
-      console.error(error);
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
+    // Helper para convertir el factor numérico a string consistente para el Select
+    const getVolumeFactorValue = (factor?: number) => {
+        if (factor === 0.5) return "0.5";
+        if (factor === 2.0) return "2.0";
+        return "1.0"; // Default
+    };
 
-  const handleOpenMove = (product: any) => {
-    setSelectedProduct(product);
-    setMoveToWarehouse('');
-    setIsMoveDialogOpen(true);
-  };
+    const validateForm = () => {
+        if (!formData.name?.trim()) { toast({ variant: "destructive", title: "Error", description: "Nombre requerido" }); return false; }
+        if (!formData.sku?.replace('SKU-','').trim()) { toast({ variant: "destructive", title: "Error", description: "SKU requerido" }); return false; }
+        if (!formData.warehouseId) { toast({ variant: "destructive", title: "Error", description: "Debes seleccionar un almacén" }); return false; }
+        return true;
+    };
 
-  const handleMoveProduct = async () => {
-    if (!moveToWarehouse) {
-      toast.error('Selecciona un almacén de destino');
-      return;
-    }
+    const preparePayload = (data: Partial<Product>) => {
+        const payload: any = { ...data };
+        if (data.warehouseId) { payload.warehouse = { id: data.warehouseId }; }
+        delete payload.warehouseId;
+        return payload;
+    };
 
-    if (moveToWarehouse === selectedProduct.warehouse_id) {
-      toast.error('El producto ya está en este almacén');
-      return;
-    }
+    const handleCreate = async () => {
+        if (!validateForm()) return;
+        try {
+            const payload = preparePayload(formData);
+            await createProduct(payload as Product);
+            setIsCreateOpen(false);
+            resetForm();
+            loadData();
+        } catch (e) { console.error(e); }
+    };
 
-    setIsSubmitting(true);
-    try {
-      await dataService.updateProduct(selectedProduct.id, {
-        warehouse_id: moveToWarehouse,
-      });
-      toast.success('Producto movido correctamente');
-      setIsMoveDialogOpen(false);
-      setSelectedProduct(null);
-      refetch();
-    } catch (error) {
-      toast.error('Error al mover el producto');
-      console.error(error);
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
+    const handleUpdate = async () => {
+        if (!selectedProduct?.id) return;
+        if (!validateForm()) return;
+        try {
+            const payload = preparePayload(formData);
+            await updateProduct(selectedProduct.id, payload as Product);
+            setIsEditOpen(false);
+            loadData();
+        } catch (e) { console.error(e); }
+    };
 
-  const handleCreateProduct = async () => {
-    if (!newProduct.sku || !newProduct.name || !newProduct.category) {
-      toast.error('Por favor completa los campos requeridos');
-      return;
-    }
+    const handleDelete = async (id: string) => {
+        if (confirm("¿Estás seguro de eliminar este producto?")) {
+            await deleteProduct(id);
+            loadData();
+        }
+    };
 
-    setIsSubmitting(true);
-    try {
-      // Determinar el estado basado en el stock
-      let status: 'normal' | 'bajo' | 'agotado' = 'normal';
-      if (newProduct.stock === 0) {
-        status = 'agotado';
-      } else if (newProduct.stock < newProduct.min_stock) {
-        status = 'bajo';
-      }
+    const openEdit = (product: Product) => {
+        setSelectedProduct(product);
+        setFormData({
+            ...product,
+            warehouseId: product.warehouse?.id || ''
+        });
+        setIsEditOpen(true);
+    };
 
-      await dataService.createProduct({
-        ...newProduct,
-        status,
-        warehouse_id: newProduct.warehouse_id || null,
-      });
-      toast.success('Producto creado correctamente');
-      setIsDialogOpen(false);
-      setNewProduct({
-        sku: '',
-        name: '',
-        category: '',
-        stock: 0,
-        min_stock: 10,
-        warehouse_id: '',
-        price: 0,
-        status: 'normal',
-        image_url: null,
-      });
-      refetch();
-    } catch (error) {
-      toast.error('Error al crear el producto');
-      console.error(error);
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
+    const resetForm = () => {
+        setFormData({
+            name: '', sku: '', category: '', stock: 0, price: 0, status: 'normal', minStock: 5,
+            volumeFactor: 1.0, warehouseId: ''
+        });
+    };
 
-  if (productsLoading) {
+    const copySku = (sku: string) => {
+        navigator.clipboard.writeText(sku);
+        toast({ description: "SKU copiado" });
+    };
+
+    const handleSkuChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const value = e.target.value.replace(/[^0-9]/g, '');
+        setFormData({ ...formData, sku: `SKU-${value}` });
+    };
+
+    const getSkuNumber = (fullSku?: string) => fullSku ? fullSku.replace('SKU-', '') : '';
+
+    const getSizeLabel = (factor?: number) => {
+        if (factor === 0.5) return "Pequeño (0.5)";
+        if (factor === 2.0) return "Grande (2.0)";
+        return "Normal (1.0)";
+    };
+
+    const filteredProducts = products.filter(product => {
+        if (!product) return false;
+        const name = product.name ? product.name.toString() : '';
+        const sku = product.sku ? product.sku.toString() : '';
+        return name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            sku.toLowerCase().includes(searchTerm.toLowerCase());
+    });
+
+    const totalPages = Math.ceil(filteredProducts.length / itemsPerPage);
+    const paginatedProducts = filteredProducts.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+
     return (
-      <div className="space-y-6 animate-fade-in">
-        <div className="flex justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-foreground">Inventarios</h1>
-            <p className="text-muted-foreground">Gestiona el inventario de productos</p>
-          </div>
-        </div>
-        <Skeleton className="h-20 w-full" />
-        <Skeleton className="h-96 w-full" />
-      </div>
+        <DashboardLayout>
+            <div className="space-y-6 animate-fade-in">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                    <div>
+                        <h1 className="text-3xl font-bold tracking-tight text-gray-900 dark:text-gray-100">Inventario</h1>
+                        <p className="text-muted-foreground">Gestión de productos y stock.</p>
+                    </div>
+
+                    <Dialog open={isCreateOpen} onOpenChange={(open) => { setIsCreateOpen(open); if(!open) resetForm(); }}>
+                        <DialogTrigger asChild>
+                            <Button className="bg-primary hover:bg-primary/90 shadow-lg"><Plus className="mr-2 h-4 w-4" /> Nuevo Producto</Button>
+                        </DialogTrigger>
+                        <DialogContent className="max-w-2xl">
+                            <DialogHeader>
+                                <DialogTitle>Nuevo Producto</DialogTitle>
+                                <DialogDescription>Ingresa los datos del producto. Asigna almacén y tamaño.</DialogDescription>
+                            </DialogHeader>
+                            <div className="grid gap-4 py-4">
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="space-y-2">
+                                        <Label>Nombre *</Label>
+                                        <Input value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} placeholder="Ej: Paleta Fresa" />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label>SKU *</Label>
+                                        <div className="flex items-center">
+                                            <span className="bg-muted px-3 py-2 border border-r-0 rounded-l-md text-muted-foreground text-sm h-10 flex items-center">SKU-</span>
+                                            <Input className="rounded-l-none" placeholder="001" value={getSkuNumber(formData.sku)} onChange={handleSkuChange} />
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="space-y-2">
+                                        <Label>Categoría</Label>
+                                        <Input value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})} placeholder="Ej: Helados" />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label>Precio</Label>
+                                        <Input type="number" min="0" value={formData.price} onChange={e => setFormData({...formData, price: parseFloat(e.target.value)})} />
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="space-y-2">
+                                        <Label>Stock Inicial</Label>
+                                        <Input type="number" min="0" value={formData.stock} onChange={e => setFormData({...formData, stock: parseInt(e.target.value)})} />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label>Almacén *</Label>
+                                        <Select onValueChange={(val) => setFormData({...formData, warehouseId: val})} value={formData.warehouseId}>
+                                            <SelectTrigger>
+                                                <SelectValue placeholder="Seleccionar Almacén" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {warehouses.map(w => (
+                                                    <SelectItem key={w.id} value={w.id || 'err'}>
+                                                        {w.name} ({w.city})
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="space-y-2">
+                                        <Label>Tamaño / Volumen *</Label>
+                                        {/* CORRECCIÓN AQUÍ: Usar getVolumeFactorValue para asegurar coincidencia */}
+                                        <Select
+                                            onValueChange={(val) => setFormData({...formData, volumeFactor: parseFloat(val)})}
+                                            value={getVolumeFactorValue(formData.volumeFactor)}
+                                        >
+                                            <SelectTrigger>
+                                                <SelectValue placeholder="Seleccionar Tamaño" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="0.5">Pequeño (0.5 cajas)</SelectItem>
+                                                <SelectItem value="1.0">Normal (1.0 caja)</SelectItem>
+                                                <SelectItem value="2.0">Grande (2.0 cajas)</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                        <p className="text-[10px] text-muted-foreground">Define cuánto espacio ocupa en el almacén.</p>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label>Estado Inicial</Label>
+                                        <Select onValueChange={(val: any) => setFormData({...formData, status: val})} value={formData.status}>
+                                            <SelectTrigger><SelectValue /></SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="normal">Normal</SelectItem>
+                                                <SelectItem value="bajo">Bajo Stock</SelectItem>
+                                                <SelectItem value="agotado">Agotado</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                </div>
+                            </div>
+                            <DialogFooter>
+                                <Button onClick={handleCreate}>Guardar Producto</Button>
+                            </DialogFooter>
+                        </DialogContent>
+                    </Dialog>
+                </div>
+
+                <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
+                    <DialogContent className="max-w-2xl">
+                        <DialogHeader>
+                            <DialogTitle>Editar Producto</DialogTitle>
+                            <DialogDescription>Modifica los detalles del producto.</DialogDescription>
+                        </DialogHeader>
+                        <div className="grid gap-4 py-4">
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                    <Label>Nombre</Label>
+                                    <Input value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>SKU</Label>
+                                    <div className="flex items-center">
+                                        <span className="bg-muted px-3 py-2 border border-r-0 rounded-l-md text-muted-foreground text-sm h-10 flex items-center">SKU-</span>
+                                        <Input className="rounded-l-none" value={getSkuNumber(formData.sku)} onChange={handleSkuChange} />
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                    <Label>Precio</Label>
+                                    <Input type="number" value={formData.price} onChange={e => setFormData({...formData, price: parseFloat(e.target.value)})} />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>Stock</Label>
+                                    <Input type="number" value={formData.stock} onChange={e => setFormData({...formData, stock: parseInt(e.target.value)})} />
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                    <Label>Almacén</Label>
+                                    <Select onValueChange={(val) => setFormData({...formData, warehouseId: val})} value={formData.warehouseId}>
+                                        <SelectTrigger><SelectValue placeholder="Seleccionar Almacén" /></SelectTrigger>
+                                        <SelectContent>
+                                            {warehouses.map(w => (
+                                                <SelectItem key={w.id} value={w.id || 'err'}>{w.name}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>Tamaño</Label>
+                                    {/* CORRECCIÓN AQUÍ TAMBIÉN */}
+                                    <Select
+                                        onValueChange={(val) => setFormData({...formData, volumeFactor: parseFloat(val)})}
+                                        value={getVolumeFactorValue(formData.volumeFactor)}
+                                    >
+                                        <SelectTrigger><SelectValue placeholder="Tamaño" /></SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="0.5">Pequeño (0.5)</SelectItem>
+                                            <SelectItem value="1.0">Normal (1.0)</SelectItem>
+                                            <SelectItem value="2.0">Grande (2.0)</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            </div>
+                        </div>
+                        <DialogFooter>
+                            <Button onClick={handleUpdate}>Actualizar</Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
+
+                {/* TABLA ... (El resto se mantiene igual) */}
+                <Card className="shadow-sm border-0 bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm">
+                    <CardHeader className="pb-3">
+                        <div className="flex flex-col sm:flex-row justify-between gap-4">
+                            <div className="relative w-full sm:w-96">
+                                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                                <Input placeholder="Buscar por nombre o SKU..." className="pl-9 bg-white dark:bg-gray-900" value={searchTerm} onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }} />
+                            </div>
+                        </div>
+                    </CardHeader>
+                    <CardContent>
+                        {loading ? <div className="space-y-2">{[...Array(5)].map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}</div> :
+                            <div className="space-y-4">
+                                <div className="rounded-md border bg-white dark:bg-gray-900">
+                                    <Table>
+                                        <TableHeader>
+                                            <TableRow className="bg-slate-50 dark:bg-gray-800 hover:bg-slate-50 dark:hover:bg-gray-800">
+                                                <TableHead>Producto</TableHead>
+                                                <TableHead>SKU</TableHead>
+                                                <TableHead>Almacén</TableHead>
+                                                <TableHead>Tamaño</TableHead>
+                                                <TableHead className="text-right">Stock</TableHead>
+                                                <TableHead className="text-right">Precio</TableHead>
+                                                <TableHead>Estado</TableHead>
+                                                <TableHead className="text-right">Acciones</TableHead>
+                                            </TableRow>
+                                        </TableHeader>
+                                        <TableBody>
+                                            {paginatedProducts.map((product, index) => (
+                                                <TableRow key={product?.id || index} className="hover:bg-slate-50/50 dark:hover:bg-gray-800/50">
+                                                    <TableCell className="font-medium">
+                                                        <div className="flex items-center gap-3">
+                                                            <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-700 dark:to-slate-800 flex items-center justify-center text-xs font-bold text-slate-500 dark:text-slate-300 shadow-inner">
+                                                                {(product?.name || '?').substring(0, 2).toUpperCase()}
+                                                            </div>
+                                                            <div className="flex flex-col">
+                                                                <span>{product?.name || 'Sin Nombre'}</span>
+                                                                <span className="text-[10px] text-muted-foreground">{product.category}</span>
+                                                            </div>
+                                                        </div>
+                                                    </TableCell>
+                                                    <TableCell className="font-mono text-xs">{product?.sku || '---'}</TableCell>
+                                                    <TableCell>
+                                                        <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                                                            <MapPin className="h-3 w-3" />
+                                                            {product.warehouse?.name || 'Sin Asignar'}
+                                                        </div>
+                                                    </TableCell>
+                                                    <TableCell>
+                                                        <div className="flex items-center gap-1 text-xs font-medium">
+                                                            <Box className="h-3 w-3 text-slate-400" />
+                                                            {getSizeLabel(product.volumeFactor)}
+                                                        </div>
+                                                    </TableCell>
+                                                    <TableCell className="text-right font-medium">{product?.stock ?? 0}</TableCell>
+                                                    <TableCell className="text-right text-muted-foreground">{formatMoney(product?.price ?? 0)}</TableCell>
+                                                    <TableCell><StatusBadge status={product?.status || 'normal'} /></TableCell>
+                                                    <TableCell className="text-right">
+                                                        <DropdownMenu>
+                                                            <DropdownMenuTrigger asChild>
+                                                                <Button variant="ghost" className="h-8 w-8 p-0"><span className="sr-only">Abrir menú</span><MoreHorizontal className="h-4 w-4" /></Button>
+                                                            </DropdownMenuTrigger>
+                                                            <DropdownMenuContent align="end">
+                                                                <DropdownMenuItem onClick={() => copySku(product.sku)}><Copy className="mr-2 h-4 w-4" /> Copiar SKU</DropdownMenuItem>
+                                                                <DropdownMenuSeparator />
+                                                                <DropdownMenuItem onClick={() => openEdit(product)}><Pencil className="mr-2 h-4 w-4" /> Editar</DropdownMenuItem>
+                                                                <DropdownMenuItem className="text-red-600" onClick={() => product.id && handleDelete(product.id)}><Trash2 className="mr-2 h-4 w-4" /> Eliminar</DropdownMenuItem>
+                                                            </DropdownMenuContent>
+                                                        </DropdownMenu>
+                                                    </TableCell>
+                                                </TableRow>
+                                            ))}
+                                        </TableBody>
+                                    </Table>
+                                </div>
+                                {/* Paginador (igual que antes) */}
+                                <div className="flex items-center justify-end space-x-2">
+                                    <Button variant="outline" size="sm" onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1}><ChevronLeft className="h-4 w-4" /></Button>
+                                    <div className="text-sm text-muted-foreground">Página {currentPage} de {totalPages || 1}</div>
+                                    <Button variant="outline" size="sm" onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage >= totalPages}><ChevronRight className="h-4 w-4" /></Button>
+                                </div>
+                            </div>
+                        }
+                    </CardContent>
+                </Card>
+            </div>
+        </DashboardLayout>
     );
-  }
-
-  return (
-    <div className="space-y-6 animate-fade-in">
-      {/* Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">Inventarios</h1>
-          <p className="text-muted-foreground">Gestiona el inventario de productos</p>
-        </div>
-        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-          <DialogTrigger asChild>
-            <Button className="gradient-inka text-primary-foreground">
-              <Plus className="mr-2 h-4 w-4" />
-              Agregar Producto
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="sm:max-w-[500px]">
-            <DialogHeader>
-              <DialogTitle>Agregar Nuevo Producto</DialogTitle>
-              <DialogDescription>
-                Completa los datos del nuevo producto para agregarlo al inventario.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="grid gap-4 py-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="sku">SKU *</Label>
-                  <Input
-                    id="sku"
-                    placeholder="PRD-001"
-                    value={newProduct.sku}
-                    onChange={(e) => setNewProduct({ ...newProduct, sku: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="name">Nombre *</Label>
-                  <Input
-                    id="name"
-                    placeholder="Nombre del producto"
-                    value={newProduct.name}
-                    onChange={(e) => setNewProduct({ ...newProduct, name: e.target.value })}
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="category">Categoría *</Label>
-                  <Input
-                    id="category"
-                    placeholder="Electrónica, Ropa, etc."
-                    value={newProduct.category}
-                    onChange={(e) => setNewProduct({ ...newProduct, category: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="price">Precio (€)</Label>
-                  <Input
-                    id="price"
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={newProduct.price}
-                    onChange={(e) => setNewProduct({ ...newProduct, price: parseFloat(e.target.value) || 0 })}
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="stock">Stock Actual</Label>
-                  <Input
-                    id="stock"
-                    type="number"
-                    min="0"
-                    value={newProduct.stock}
-                    onChange={(e) => setNewProduct({ ...newProduct, stock: parseInt(e.target.value) || 0 })}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="min_stock">Stock Mínimo</Label>
-                  <Input
-                    id="min_stock"
-                    type="number"
-                    min="0"
-                    value={newProduct.min_stock}
-                    onChange={(e) => setNewProduct({ ...newProduct, min_stock: parseInt(e.target.value) || 0 })}
-                  />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="warehouse">Almacén</Label>
-                <Select
-                  value={newProduct.warehouse_id}
-                  onValueChange={(value) => setNewProduct({ ...newProduct, warehouse_id: value })}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Seleccionar almacén" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {warehouses.map((w) => (
-                      <SelectItem key={w.id} value={w.id}>
-                        {w.name} - {w.city}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
-                Cancelar
-              </Button>
-              <Button onClick={handleCreateProduct} disabled={isSubmitting}>
-                {isSubmitting ? 'Creando...' : 'Crear Producto'}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      </div>
-
-      {/* Filters */}
-      <Card>
-        <CardContent className="pt-6">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-            <div className="relative lg:col-span-2">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={18} />
-              <Input
-                placeholder="Buscar por nombre o SKU..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10"
-              />
-            </div>
-            
-            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-              <SelectTrigger>
-                <SelectValue placeholder="Categoría" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todas las categorías</SelectItem>
-                {categories.map(cat => (
-                  <SelectItem key={cat} value={cat}>{cat}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            <Select value={warehouseFilter} onValueChange={setWarehouseFilter}>
-              <SelectTrigger>
-                <SelectValue placeholder="Almacén" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todos los almacenes</SelectItem>
-                {warehouses.map(w => (
-                  <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger>
-                <Filter className="mr-2 h-4 w-4" />
-                <SelectValue placeholder="Estado" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todos los estados</SelectItem>
-                <SelectItem value="normal">Normal</SelectItem>
-                <SelectItem value="bajo">Stock Bajo</SelectItem>
-                <SelectItem value="agotado">Agotado</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Products Table */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-lg font-semibold flex items-center gap-2">
-            <Package className="h-5 w-5 text-primary" />
-            {filteredProducts.length} productos encontrados
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>SKU</TableHead>
-                  <TableHead>Producto</TableHead>
-                  <TableHead>Categoría</TableHead>
-                  <TableHead className="text-center">Stock Actual</TableHead>
-                  <TableHead className="text-center">Stock Mín.</TableHead>
-                  <TableHead>Almacén</TableHead>
-                  <TableHead className="text-right">Precio</TableHead>
-                  <TableHead>Estado</TableHead>
-                  <TableHead className="text-right">Acciones</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredProducts.map((product) => (
-                  <TableRow key={product.id} className="hover:bg-muted/50">
-                    <TableCell className="font-mono text-sm text-muted-foreground">
-                      {product.sku}
-                    </TableCell>
-                    <TableCell className="font-medium">{product.name}</TableCell>
-                    <TableCell>
-                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-muted text-muted-foreground">
-                        {product.category}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-center">
-                      <span className={`font-semibold ${
-                        product.stock === 0 ? 'text-destructive' :
-                        product.stock < product.min_stock ? 'text-warning' : 'text-foreground'
-                      }`}>
-                        {product.stock}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-center text-muted-foreground">
-                      {product.min_stock}
-                    </TableCell>
-                    <TableCell className="text-sm">{getWarehouseName(product.warehouse_id)}</TableCell>
-                    <TableCell className="text-right font-semibold">
-                      {formatPrice(Number(product.price))}
-                    </TableCell>
-                    <TableCell>
-                      <StatusBadge status={product.status} />
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon">
-                            <MoreHorizontal size={16} />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => handleOpenEdit(product)}>
-                            <Edit className="mr-2 h-4 w-4" />
-                            Editar
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleOpenMove(product)}>
-                            <ArrowRightLeft className="mr-2 h-4 w-4" />
-                            Mover a otro almacén
-                          </DropdownMenuItem>
-                          <DropdownMenuItem 
-                            className="text-destructive"
-                            onClick={() => handleDeleteProduct(product.id)}
-                          >
-                            <Trash2 className="mr-2 h-4 w-4" />
-                            Eliminar
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Edit Product Dialog */}
-      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-        <DialogContent className="sm:max-w-[500px]">
-          <DialogHeader>
-            <DialogTitle>Editar Producto</DialogTitle>
-            <DialogDescription>
-              Modifica los datos del producto.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="edit_sku">SKU *</Label>
-                <Input
-                  id="edit_sku"
-                  value={editProduct.sku}
-                  onChange={(e) => setEditProduct({ ...editProduct, sku: e.target.value })}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="edit_name">Nombre *</Label>
-                <Input
-                  id="edit_name"
-                  value={editProduct.name}
-                  onChange={(e) => setEditProduct({ ...editProduct, name: e.target.value })}
-                />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="edit_category">Categoría *</Label>
-                <Input
-                  id="edit_category"
-                  value={editProduct.category}
-                  onChange={(e) => setEditProduct({ ...editProduct, category: e.target.value })}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="edit_price">Precio</Label>
-                <Input
-                  id="edit_price"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={editProduct.price}
-                  onChange={(e) => setEditProduct({ ...editProduct, price: parseFloat(e.target.value) || 0 })}
-                />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="edit_stock">Stock Actual</Label>
-                <Input
-                  id="edit_stock"
-                  type="number"
-                  min="0"
-                  value={editProduct.stock}
-                  onChange={(e) => setEditProduct({ ...editProduct, stock: parseInt(e.target.value) || 0 })}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="edit_min_stock">Stock Mínimo</Label>
-                <Input
-                  id="edit_min_stock"
-                  type="number"
-                  min="0"
-                  value={editProduct.min_stock}
-                  onChange={(e) => setEditProduct({ ...editProduct, min_stock: parseInt(e.target.value) || 0 })}
-                />
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="edit_warehouse">Almacén</Label>
-              <Select
-                value={editProduct.warehouse_id}
-                onValueChange={(value) => setEditProduct({ ...editProduct, warehouse_id: value })}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Seleccionar almacén" />
-                </SelectTrigger>
-                <SelectContent>
-                  {warehouses.map((w) => (
-                    <SelectItem key={w.id} value={w.id}>
-                      {w.name} - {w.city}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
-              Cancelar
-            </Button>
-            <Button onClick={handleUpdateProduct} disabled={isSubmitting}>
-              {isSubmitting ? 'Guardando...' : 'Guardar Cambios'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Move Product Dialog */}
-      <Dialog open={isMoveDialogOpen} onOpenChange={setIsMoveDialogOpen}>
-        <DialogContent className="sm:max-w-[400px]">
-          <DialogHeader>
-            <DialogTitle>Mover Producto</DialogTitle>
-            <DialogDescription>
-              {selectedProduct && `Mover "${selectedProduct.name}" a otro almacén.`}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="space-y-2">
-              <Label>Almacén Actual</Label>
-              <div className="p-2 bg-muted rounded-md text-sm">
-                {selectedProduct ? getWarehouseName(selectedProduct.warehouse_id) : '-'}
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="move_warehouse">Nuevo Almacén</Label>
-              <Select value={moveToWarehouse} onValueChange={setMoveToWarehouse}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Seleccionar almacén destino" />
-                </SelectTrigger>
-                <SelectContent>
-                  {warehouses.filter(w => w.is_active).map((w) => (
-                    <SelectItem key={w.id} value={w.id}>
-                      {w.name} - {w.city}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsMoveDialogOpen(false)}>
-              Cancelar
-            </Button>
-            <Button onClick={handleMoveProduct} disabled={isSubmitting}>
-              {isSubmitting ? 'Moviendo...' : 'Mover Producto'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </div>
-  );
 };
 
 export default Inventory;
