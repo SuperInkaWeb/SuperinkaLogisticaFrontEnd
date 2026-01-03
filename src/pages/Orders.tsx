@@ -4,7 +4,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { useApiData, Order } from "@/hooks/useApiData";
+// CORRECCIÓN: Importamos la interfaz Carrier
+import { useApiData, Order, Carrier } from "@/hooks/useApiData";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useAuth } from "@/frontend/context/AuthContext";
 import { Eye, Truck, CheckCircle, Store, ArrowRight, XCircle, Search, Calendar, History } from "lucide-react";
@@ -22,7 +23,8 @@ const Orders: React.FC = () => {
     const { toast } = useToast();
 
     const [orders, setOrders] = useState<Order[]>([]);
-    const [carriers, setCarriers] = useState<any[]>([]);
+    // CORRECCIÓN (Línea 25): Tipado correcto del estado de transportistas
+    const [carriers, setCarriers] = useState<Carrier[]>([]);
     const [selectedCarrier, setSelectedCarrier] = useState("");
 
     // Estados para Filtros
@@ -57,14 +59,10 @@ const Orders: React.FC = () => {
     // --- LÓGICA DE FILTRADO ---
     const filteredOrders = orders.filter(order => {
         // 1. Filtro de Fecha
-        // Para clientes (sin controles de fecha), si hay búsqueda ignoramos la fecha para buscar en todo el historial,
-        // de lo contrario mostramos solo hoy (comportamiento por defecto) o todo si se prefiere.
-        // Ajuste: Si es Admin usa los controles. Si es Cliente, usa lógica automática.
         let matchesDate = true;
         if (isAdminOrStaff) {
             matchesDate = showHistory || (order.date === dateFilter);
         } else {
-            // Cliente: Si busca algo, busca en todo. Si no, solo hoy.
             matchesDate = searchTerm ? true : (order.date === dateFilter);
         }
 
@@ -74,7 +72,10 @@ const Orders: React.FC = () => {
         // 3. Buscador (Nro Orden o Cliente)
         const searchLower = searchTerm.toLowerCase();
         const orderNum = order.orderNumber?.toLowerCase() || "";
-        const clientName = (order.user as any)?.name?.toLowerCase() || "";
+
+        // CORRECCIÓN (Línea 77): Acceso directo seguro sin 'as any'
+        const clientName = order.user?.name?.toLowerCase() || "";
+
         const matchesSearch = orderNum.includes(searchLower) || clientName.includes(searchLower);
 
         return matchesDate && matchesStatus && matchesSearch;
@@ -105,7 +106,8 @@ const Orders: React.FC = () => {
     };
 
     const getStatusBadge = (status: string) => {
-        const styles: any = {
+        // CORRECCIÓN (Línea 108): Tipado explícito para el objeto de estilos
+        const styles: Record<string, string> = {
             'pendiente': 'bg-yellow-500 hover:bg-yellow-600',
             'en_proceso': 'bg-blue-500 hover:bg-blue-600',
             'en_ruta': 'bg-purple-500 hover:bg-purple-600',
@@ -261,7 +263,8 @@ const Orders: React.FC = () => {
                                                     <span className="text-[10px] text-muted-foreground">{order.date}</span>
                                                 </div>
                                             </TableCell>
-                                            {isAdminOrStaff && <TableCell className="font-medium">{(order.user as any)?.name || 'Usuario'}</TableCell>}
+                                            {/* CORRECCIÓN: Acceso seguro a nombre de usuario */}
+                                            {isAdminOrStaff && <TableCell className="font-medium">{order.user?.name || 'Usuario'}</TableCell>}
                                             <TableCell>
                                                 <div className="flex items-center gap-2">
                                                     {order.deliveryType === 'warehouse' ? (
@@ -356,8 +359,9 @@ const Orders: React.FC = () => {
                                 <div className="grid grid-cols-2 gap-4 text-sm bg-slate-50 dark:bg-slate-900 p-4 rounded-lg">
                                     <div className="space-y-1">
                                         <span className="text-muted-foreground font-semibold">Cliente:</span>
-                                        <p className="font-medium">{(selectedOrder.user as any)?.name}</p>
-                                        <p className="text-xs text-muted-foreground">{(selectedOrder.user as any)?.email}</p>
+                                        {/* CORRECCIÓN (Línea 264): Acceso seguro a nombre de usuario */}
+                                        <p className="font-medium">{selectedOrder.user?.name}</p>
+                                        <p className="text-xs text-muted-foreground">{selectedOrder.user?.email}</p>
                                     </div>
                                     <div className="space-y-1">
                                         <span className="text-muted-foreground font-semibold">Entrega:</span>
