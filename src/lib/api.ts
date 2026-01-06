@@ -5,7 +5,7 @@ import axios from 'axios';
  * En Local: Usará http://localhost:8080/api/v1 (vía fallback)
  * En Producción (Vercel): Usará el valor de la variable VITE_API_URL definida en el dashboard.
  */
-const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080/api/v1';
+const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080/api';
 
 export const api = axios.create({
     baseURL: BASE_URL,
