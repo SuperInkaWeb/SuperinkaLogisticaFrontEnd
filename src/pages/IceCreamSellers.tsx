@@ -10,30 +10,42 @@ import { Label } from "@/components/ui/label";
 import { useApiData, IceCreamSeller } from "@/hooks/useApiData";
 import { useCurrency } from "@/context/CurrencyContext";
 import { useToast } from "@/hooks/use-toast";
-import { Search, Wallet, Truck, ArrowDownCircle, AlertCircle, Banknote } from "lucide-react";
+import {
+    Search,
+    Wallet,
+    Truck,
+    ArrowDownCircle,
+    AlertCircle,
+    Banknote,
+    Edit,
+    User,
+    Phone,
+    MapPin,
+    Mail
+} from "lucide-react";
 
 const IceCreamSellers: React.FC = () => {
-    const { getSellers, updateUserDebt } = useApiData();
+    const { getSellers, updateUserDebt, updateSeller } = useApiData();
 
     const { formatMoney } = useCurrency();
     const { toast } = useToast();
 
     const [sellers, setSellers] = useState<IceCreamSeller[]>([]);
     const [loading, setLoading] = useState(true);
-
-    // Estado para Buscador
     const [searchTerm, setSearchTerm] = useState("");
 
-    // Estados para Modal de Amortización
+    // Estados para Modales
     const [isAmortizeOpen, setIsAmortizeOpen] = useState(false);
+    const [isEditOpen, setIsEditOpen] = useState(false);
     const [selectedSeller, setSelectedSeller] = useState<IceCreamSeller | null>(null);
+    const [editingSeller, setEditingSeller] = useState<Partial<IceCreamSeller>>({});
+
     const [amountToPay, setAmountToPay] = useState<string>("");
     const [paymentNote, setPaymentNote] = useState("");
     const [isProcessing, setIsProcessing] = useState(false);
 
-    // ESTADO DERIVADO PARA VALIDACIÓN PREVENTIVA
-    // Calculamos si el monto es inválido en tiempo real
-    const currentDebt = selectedSeller?.debt || 0;
+    // Cálculos de validación para Amortización
+    const currentDebt = selectedSeller?.debt ?? selectedSeller?.currentDebt ?? 0;
     const numericAmount = parseFloat(amountToPay || "0");
     const isAmountExcessive = numericAmount > currentDebt;
     const isAmountInvalid = isNaN(numericAmount) || numericAmount <= 0;
@@ -42,18 +54,12 @@ const IceCreamSellers: React.FC = () => {
         setLoading(true);
         try {
             const data = await getSellers();
-
-            // NORMALIZACIÓN DE DATOS
-            const normalizedData = data.map(seller => ({
-                ...seller,
-                debt: seller.debt ?? seller.currentDebt ?? 0
+            // Normalización de datos para asegurar compatibilidad
+            const normalizedData = data.map(s => ({
+                ...s,
+                debt: s.debt ?? s.currentDebt ?? 0
             }));
-
-            const filtered = normalizedData.filter(u =>
-                (u.role?.toLowerCase().includes('heladero')) || ((u.debt || 0) > 0)
-            );
-
-            setSellers(filtered.sort((a, b) => (b.debt || 0) - (a.debt || 0)));
+            setSellers(normalizedData);
         } catch (error) {
             console.error("Error cargando heladeros", error);
         } finally {
@@ -67,11 +73,14 @@ const IceCreamSellers: React.FC = () => {
 
     const filteredSellers = sellers.filter(seller => {
         const search = searchTerm.toLowerCase();
-        const nameMatch = seller.name?.toLowerCase().includes(search);
-        const codeMatch = seller.code?.toLowerCase().includes(search);
-        return nameMatch || codeMatch;
+        return (
+            seller.name?.toLowerCase().includes(search) ||
+            seller.email?.toLowerCase().includes(search) ||
+            seller.dni?.includes(search)
+        );
     });
 
+    // --- LÓGICA DE AMORTIZACIÓN (COBRANZA) ---
     const handleOpenAmortize = (seller: IceCreamSeller) => {
         setSelectedSeller(seller);
         setAmountToPay("");
@@ -80,36 +89,39 @@ const IceCreamSellers: React.FC = () => {
     };
 
     const handleConfirmPayment = async () => {
-        if (!selectedSeller || !amountToPay || !selectedSeller.id) return;
-
-        // Validación final antes de enviar (redundante con el botón disabled, pero segura)
-        if (isAmountInvalid || isAmountExcessive) {
-            toast({ variant: "destructive", title: "Error", description: "Monto inválido o excede la deuda." });
-            return;
-        }
-
+        if (!selectedSeller?.id || isAmountInvalid || isAmountExcessive) return;
         setIsProcessing(true);
-
         try {
             const success = await updateUserDebt(selectedSeller.id, numericAmount, paymentNote);
-
             if (success) {
-                const updatedSellers = sellers.map(s => {
-                    if (s.id === selectedSeller.id) {
-                        return { ...s, debt: (s.debt || 0) - numericAmount };
-                    }
-                    return s;
-                });
-
-                setSellers(updatedSellers);
+                // Actualización optimista de la tabla
+                setSellers(prev => prev.map(s =>
+                    s.id === selectedSeller.id
+                        ? { ...s, debt: (s.debt || 0) - numericAmount }
+                        : s
+                ));
                 setIsAmortizeOpen(false);
-            } else {
-                // El hook useApiData ya mostró el toast de error genérico,
-                // pero aquí podríamos mostrar algo específico si el backend devuelve el mensaje.
-                // Por ahora confiamos en que el hook maneja el mensaje.
             }
-        } catch (error) {
-            console.error("Error al amortizar", error);
+        } finally {
+            setIsProcessing(false);
+        }
+    };
+
+    // --- LÓGICA DE EDICIÓN DE PERFIL ---
+    const handleOpenEdit = (seller: IceCreamSeller) => {
+        setEditingSeller({ ...seller });
+        setIsEditOpen(true);
+    };
+
+    const handleSaveSellerChanges = async () => {
+        if (!editingSeller.id || !editingSeller.name) return;
+        setIsProcessing(true);
+        try {
+            await updateSeller(editingSeller.id, editingSeller as IceCreamSeller);
+            // Actualización optimista de la tabla
+            setSellers(prev => prev.map(s => s.id === editingSeller.id ? { ...s, ...editingSeller } as IceCreamSeller : s));
+            setIsEditOpen(false);
+            toast({ title: "Cambios guardados", description: `Se actualizó el perfil de ${editingSeller.name}.` });
         } finally {
             setIsProcessing(false);
         }
@@ -119,7 +131,7 @@ const IceCreamSellers: React.FC = () => {
         return (
             <DashboardLayout>
                 <div className="flex items-center justify-center h-[50vh]">
-                    <p className="text-muted-foreground">Cargando cartera...</p>
+                    <p className="text-muted-foreground animate-pulse">Cargando información de cartera...</p>
                 </div>
             </DashboardLayout>
         );
@@ -128,14 +140,12 @@ const IceCreamSellers: React.FC = () => {
     return (
         <DashboardLayout>
             <div className="space-y-6 animate-fade-in max-w-6xl mx-auto">
-
                 {/* CABECERA */}
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                     <div>
                         <h1 className="text-3xl font-bold tracking-tight text-gray-900 dark:text-gray-100">Cartera de Heladeros</h1>
-                        <p className="text-muted-foreground">Control de cuentas corrientes y recaudación.</p>
+                        <p className="text-muted-foreground">Administración de límites de crédito y cobranzas en tiempo real.</p>
                     </div>
-
                     <div className="relative w-full md:w-auto">
                         <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
                         <Input
@@ -147,37 +157,36 @@ const IceCreamSellers: React.FC = () => {
                     </div>
                 </div>
 
-                {/* RESUMEN RÁPIDO */}
-                <div className="grid gap-4 md:grid-cols-3">
-                    <Card className="bg-slate-50 dark:bg-slate-900/50">
-                        <CardContent className="p-4 flex items-center justify-between">
+                {/* KPI CARDS */}
+                <div className="grid gap-4 md:grid-cols-2">
+                    <Card className="bg-red-50 dark:bg-red-900/10 border-red-100">
+                        <CardContent className="p-6 flex items-center justify-between">
                             <div>
-                                <p className="text-sm font-medium text-muted-foreground">Deuda Total Cartera</p>
-                                <h2 className="text-2xl font-bold text-red-600">
+                                <p className="text-sm font-medium text-red-600 mb-1">Deuda Total Cartera</p>
+                                <h2 className="text-3xl font-bold text-red-700">
                                     {formatMoney(sellers.reduce((acc, curr) => acc + (curr.debt || 0), 0))}
                                 </h2>
                             </div>
-                            <Banknote className="h-8 w-8 text-red-200" />
+                            <Banknote className="h-12 w-12 text-red-200" />
                         </CardContent>
                     </Card>
-                    <Card className="bg-slate-50 dark:bg-slate-900/50">
-                        <CardContent className="p-4 flex items-center justify-between">
+                    <Card className="bg-blue-50 dark:bg-blue-900/10 border-blue-100">
+                        <CardContent className="p-6 flex items-center justify-between">
                             <div>
-                                <p className="text-sm font-medium text-muted-foreground">Heladeros con Deuda</p>
-                                <h2 className="text-2xl font-bold">
-                                    {sellers.filter(s => (s.debt || 0) > 0).length}
+                                <p className="text-sm font-medium text-blue-600 mb-1">Crédito Global Asignado</p>
+                                <h2 className="text-3xl font-bold text-blue-700">
+                                    {formatMoney(sellers.reduce((acc, curr) => acc + (curr.creditLimit || 0), 0))}
                                 </h2>
                             </div>
-                            <Truck className="h-8 w-8 text-slate-200" />
+                            <Wallet className="h-12 w-12 text-blue-200" />
                         </CardContent>
                     </Card>
                 </div>
 
-                {/* TABLA DE HELADEROS */}
+                {/* TABLA PRINCIPAL */}
                 <Card>
-                    <CardHeader className="pb-2">
-                        <CardTitle>Listado de Deudores</CardTitle>
-                        <CardDescription>Gestión de pagos fuera de liquidación.</CardDescription>
+                    <CardHeader>
+                        <CardTitle>Listado de Cuentas Corrientes</CardTitle>
                     </CardHeader>
                     <CardContent>
                         <div className="rounded-md border">
@@ -185,115 +194,136 @@ const IceCreamSellers: React.FC = () => {
                                 <TableHeader>
                                     <TableRow>
                                         <TableHead>Heladero</TableHead>
-                                        <TableHead>Contacto</TableHead>
-                                        <TableHead className="text-right">Deuda Actual</TableHead>
+                                        <TableHead>Estado de Crédito</TableHead>
+                                        <TableHead className="text-right">Deuda Pendiente</TableHead>
                                         <TableHead className="text-right">Acciones</TableHead>
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
-                                    {filteredSellers.length === 0 ? (
-                                        <TableRow>
-                                            <TableCell colSpan={4} className="text-center h-24 text-muted-foreground">
-                                                No se encontraron heladeros con los criterios actuales.
-                                            </TableCell>
-                                        </TableRow>
-                                    ) : (
-                                        filteredSellers.map((seller) => (
-                                            <TableRow key={seller.id}>
-                                                <TableCell>
-                                                    <div className="flex items-center gap-3">
-                                                        <div className="h-9 w-9 rounded-full bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center text-orange-600">
-                                                            <Truck className="h-4 w-4"/>
-                                                        </div>
-                                                        <div className="flex flex-col">
-                                                            <span className="font-medium">{seller.name}</span>
-                                                            {seller.code && <span className="text-xs text-muted-foreground">COD: {seller.code}</span>}
-                                                        </div>
+                                    {filteredSellers.map((seller) => (
+                                        <TableRow key={seller.id}>
+                                            <TableCell>
+                                                <div className="flex items-center gap-3">
+                                                    <div className="h-9 w-9 rounded-full bg-slate-100 flex items-center justify-center">
+                                                        <User className="h-4 w-4 text-slate-500"/>
                                                     </div>
-                                                </TableCell>
-                                                <TableCell>
-                                                    <div className="text-sm">{seller.email}</div>
-                                                    <div className="text-xs text-muted-foreground">{seller.phone || 'Sin teléfono'}</div>
-                                                </TableCell>
-                                                <TableCell className="text-right">
-                                                    {(seller.debt || 0) > 0 ? (
-                                                        <Badge variant="outline" className="border-red-200 bg-red-50 text-red-700 text-sm py-1 px-2">
-                                                            {formatMoney(seller.debt || 0)}
-                                                        </Badge>
-                                                    ) : (
-                                                        <Badge variant="secondary" className="bg-green-50 text-green-700 hover:bg-green-100">
-                                                            Solvente
-                                                        </Badge>
-                                                    )}
-                                                </TableCell>
-                                                <TableCell className="text-right">
+                                                    <div className="flex flex-col">
+                                                        <span className="font-semibold text-sm">{seller.name}</span>
+                                                        <span className="text-[10px] text-muted-foreground">{seller.email}</span>
+                                                    </div>
+                                                </div>
+                                            </TableCell>
+                                            <TableCell>
+                                                <div className="flex flex-col gap-1">
+                                                    <span className="text-xs font-bold text-blue-600">
+                                                        Disp: {formatMoney((seller.creditLimit || 0) - (seller.debt || 0))}
+                                                    </span>
+                                                    <div className="w-24 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                                        <div
+                                                            className="h-full bg-blue-500"
+                                                            style={{ width: `${Math.min(100, ((seller.debt || 0) / (seller.creditLimit || 1)) * 100)}%` }}
+                                                        />
+                                                    </div>
+                                                </div>
+                                            </TableCell>
+                                            <TableCell className="text-right font-bold text-red-600">
+                                                {formatMoney(seller.debt || 0)}
+                                            </TableCell>
+                                            <TableCell className="text-right">
+                                                <div className="flex justify-end gap-2">
+                                                    <Button size="sm" variant="outline" onClick={() => handleOpenEdit(seller)}>
+                                                        <Edit className="h-4 w-4" />
+                                                    </Button>
                                                     <Button
                                                         size="sm"
-                                                        className={`
-                                                    ${(seller.debt || 0) > 0
-                                                            ? 'bg-green-600 hover:bg-green-700 text-white'
-                                                            : 'bg-slate-100 text-slate-400 hover:bg-slate-200'}
-                                                `}
+                                                        className="bg-green-600 hover:bg-green-700"
                                                         disabled={(seller.debt || 0) <= 0}
                                                         onClick={() => handleOpenAmortize(seller)}
                                                     >
-                                                        <Wallet className="h-4 w-4 mr-2" />
-                                                        Amortizar
+                                                        <ArrowDownCircle className="h-4 w-4 mr-2" />
+                                                        Cobrar
                                                     </Button>
-                                                </TableCell>
-                                            </TableRow>
-                                        ))
-                                    )}
+                                                </div>
+                                            </TableCell>
+                                        </TableRow>
+                                    ))}
                                 </TableBody>
                             </Table>
                         </div>
                     </CardContent>
                 </Card>
 
-                {/* MODAL DE AMORTIZACIÓN */}
-                <Dialog open={isAmortizeOpen} onOpenChange={setIsAmortizeOpen}>
-                    <DialogContent className="sm:max-w-[425px]">
+                {/* MODAL EDITAR PERFIL Y CRÉDITO */}
+                <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
+                    <DialogContent className="sm:max-w-[500px]">
                         <DialogHeader>
-                            <DialogTitle className="flex items-center gap-2 text-green-700">
-                                <ArrowDownCircle className="h-5 w-5" />
-                                Registrar Amortización
-                            </DialogTitle>
-                            <DialogDescription>
-                                Ingresa el pago en efectivo recibido de <strong>{selectedSeller?.name}</strong>.
-                            </DialogDescription>
+                            <DialogTitle className="flex items-center gap-2"><Edit className="w-5 h-5"/> Editar Perfil</DialogTitle>
+                            <DialogDescription>Actualiza los datos personales y el límite de compra del heladero.</DialogDescription>
                         </DialogHeader>
-
-                        <div className="grid gap-6 py-4">
-                            <div className="p-4 bg-slate-50 dark:bg-slate-900 rounded-lg border flex justify-between items-center">
-                                <div className="flex gap-2 items-center text-muted-foreground">
-                                    <AlertCircle className="h-4 w-4" />
-                                    <span className="text-sm font-medium">Deuda Pendiente:</span>
+                        <div className="grid gap-4 py-4">
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                    <Label className="text-xs">Nombre</Label>
+                                    <Input value={editingSeller.name || ''} onChange={e => setEditingSeller({...editingSeller, name: e.target.value})} />
                                 </div>
-                                <span className="text-2xl font-bold text-red-600">{formatMoney(currentDebt)}</span>
-                            </div>
-
-                            <div className="space-y-3">
-                                <Label htmlFor="amount" className="text-base">Monto a Pagar</Label>
-                                <div className="relative">
-                                    <span className="absolute left-3 top-3 text-slate-500 font-bold text-lg">$</span>
-                                    <Input
-                                        id="amount"
-                                        type="number"
-                                        placeholder="0.00"
-                                        className={`pl-8 text-xl font-bold h-12 ${isAmountExcessive ? 'border-red-500 bg-red-50 text-red-700' : ''}`}
-                                        value={amountToPay}
-                                        onChange={(e) => setAmountToPay(e.target.value)}
-                                        autoFocus
-                                    />
+                                <div className="space-y-2">
+                                    <Label className="text-xs">DNI</Label>
+                                    <Input value={editingSeller.dni || ''} onChange={e => setEditingSeller({...editingSeller, dni: e.target.value})} />
                                 </div>
-                                {/* Mensaje de Error en Tiempo Real */}
-                                {isAmountExcessive && (
-                                    <p className="text-xs text-red-600 font-semibold flex items-center gap-1 animate-pulse">
-                                        <AlertCircle className="h-3 w-3"/> El monto no puede ser mayor a la deuda ({formatMoney(currentDebt)})
-                                    </p>
-                                )}
                             </div>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                    <Label className="text-xs">Email</Label>
+                                    <Input value={editingSeller.email || ''} onChange={e => setEditingSeller({...editingSeller, email: e.target.value})} />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label className="text-xs">Teléfono</Label>
+                                    <Input value={editingSeller.phone || ''} onChange={e => setEditingSeller({...editingSeller, phone: e.target.value})} />
+                                </div>
+                            </div>
+                            <div className="space-y-2">
+                                <Label className="text-xs">Dirección</Label>
+                                <Input value={editingSeller.address || ''} onChange={e => setEditingSeller({...editingSeller, address: e.target.value})} />
+                            </div>
+                            <div className="p-4 bg-blue-50 rounded-lg border border-blue-100">
+                                <Label className="text-blue-700 font-bold mb-2 block">Límite de Crédito (S/)</Label>
+                                <Input
+                                    type="number"
+                                    className="text-lg font-bold"
+                                    value={editingSeller.creditLimit || 0}
+                                    onChange={e => setEditingSeller({...editingSeller, creditLimit: parseFloat(e.target.value) || 0})}
+                                />
+                            </div>
+                        </div>
+                        <DialogFooter>
+                            <Button variant="outline" onClick={() => setIsEditOpen(false)}>Cancelar</Button>
+                            <Button onClick={handleSaveSellerChanges} disabled={isProcessing}>Guardar Cambios</Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
 
+                {/* MODAL COBRANZA */}
+                <Dialog open={isAmortizeOpen} onOpenChange={setIsAmortizeOpen}>
+                    <DialogContent>
+                        <DialogHeader>
+                            <DialogTitle>Registrar Pago</DialogTitle>
+                            <DialogDescription>Ingresa el monto recibido de {selectedSeller?.name}.</DialogDescription>
+                        </DialogHeader>
+                        <div className="space-y-4 py-4">
+                            <div className="p-4 bg-slate-50 rounded-lg flex justify-between items-center">
+                                <span className="text-sm text-muted-foreground">Deuda actual:</span>
+                                <span className="text-xl font-bold text-red-600">{formatMoney(currentDebt)}</span>
+                            </div>
+                            <div className="space-y-2">
+                                <Label>Monto a Amortizar</Label>
+                                <Input
+                                    type="number"
+                                    className="text-xl h-12 font-bold"
+                                    value={amountToPay}
+                                    onChange={e => setAmountToPay(e.target.value)}
+                                />
+                                {isAmountExcessive && <p className="text-xs text-red-600">El monto no puede superar la deuda.</p>}
+                            </div>
                             <div className="space-y-2">
                                 <Label htmlFor="note">Concepto / Nota (Opcional)</Label>
                                 <Input
@@ -304,23 +334,18 @@ const IceCreamSellers: React.FC = () => {
                                 />
                             </div>
                         </div>
-
                         <DialogFooter>
-                            <Button variant="outline" onClick={() => setIsAmortizeOpen(false)} disabled={isProcessing}>
-                                Cancelar
-                            </Button>
-                            {/* Botón condicionalmente deshabilitado si el monto es erróneo */}
+                            <Button variant="outline" onClick={() => setIsAmortizeOpen(false)}>Cancelar</Button>
                             <Button
-                                onClick={handleConfirmPayment}
-                                className="bg-green-600 hover:bg-green-700 text-white min-w-[120px]"
+                                className="bg-green-600 hover:bg-green-700"
                                 disabled={isProcessing || isAmountInvalid || isAmountExcessive}
+                                onClick={handleConfirmPayment}
                             >
-                                {isProcessing ? "Procesando..." : "Confirmar Pago"}
+                                Confirmar Pago
                             </Button>
                         </DialogFooter>
                     </DialogContent>
                 </Dialog>
-
             </div>
         </DashboardLayout>
     );

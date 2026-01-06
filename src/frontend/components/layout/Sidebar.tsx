@@ -57,8 +57,17 @@ const Sidebar = ({ isOpen, onClose }: SidebarProps) => {
     const getMenuItems = () => {
         const items: MenuItem[] = [];
 
-        // 1. VISTA CLIENTE O HELADERO
-        // CORRECCIÓN: Agregamos 'heladero' aquí
+        // --- 1. SUPER ADMIN (Gestión SaaS Exclusiva) ---
+        if (role === 'super_admin') {
+            return [
+                { icon: LayoutDashboard, label: "Dashboard SaaS", path: "/dashboard" },
+                { icon: Building2, label: "Empresas", path: "/companies" },
+                { icon: Users, label: "Usuarios Globales", path: "/users" }, // Gestión de Admins
+                { icon: Settings, label: "Configuración", path: "/configuration" }
+            ];
+        }
+
+        // --- 2. VISTA CLIENTE O HELADERO ---
         if (role === 'cliente' || role === 'heladero') {
             return [
                 { icon: Store, label: "Catálogo", path: "/shop" },
@@ -68,58 +77,44 @@ const Sidebar = ({ isOpen, onClose }: SidebarProps) => {
             ];
         }
 
-        // 2. VISTAS DE GESTIÓN (Staff + Super Admin)
+        // --- 3. VISTAS DE GESTIÓN OPERATIVA (Admin, Supervisor, Operador) ---
 
-        // Dashboard: Super Admin, Admin, Supervisor
-        if (['super_admin', 'admin', 'supervisor'].includes(role)) {
-            items.push({ icon: LayoutDashboard, label: "Dashboard", path: "/dashboard" });
-        }
+        // Dashboard
+        items.push({ icon: LayoutDashboard, label: "Dashboard", path: "/dashboard" });
 
-        // Gestión SaaS (Solo Super Admin)
-        if (role === 'super_admin') {
-            items.push({ icon: Building2, label: "Empresas", path: "/companies" });
-            items.push({ icon: Users, label: "Usuarios Globales", path: "/users" });
-        }
+        // GRUPO INVENTARIO (Desplegable) - Admin, Supervisor, Operador
+        items.push({
+            type: 'group',
+            label: 'Inventario & Activos',
+            icon: Package,
+            children: [
+                { label: "Productos", path: "/inventory", icon: Package },
+                { label: "Activos Clientes", path: "/assets/client", icon: Bike },
+                { label: "Activos Empresa", path: "/assets/company", icon: Sofa }
+            ]
+        });
 
-        // GRUPO INVENTARIO (Desplegable)
-        if (['super_admin', 'admin', 'supervisor', 'operador'].includes(role)) {
-            items.push({
-                type: 'group',
-                label: 'Inventario & Activos',
-                icon: Package,
-                children: [
-                    { label: "Productos", path: "/inventory", icon: Package },
-                    { label: "Activos Clientes", path: "/assets/client", icon: Bike },
-                    { label: "Activos Empresa", path: "/assets/company", icon: Sofa }
-                ]
-            });
-        }
+        // OPERACIONES - Admin, Supervisor, Operador
+        items.push({ icon: ClipboardList, label: "Despachos", path: "/dispatch" });
+        items.push({ icon: FileText, label: "Liquidación", path: "/settlement" });
+        items.push({ icon: ShoppingCart, label: "Gestión Pedidos", path: "/orders" });
+        items.push({ icon: Warehouse, label: "Almacenes", path: "/warehouses" });
 
-        // OPERACIONES
-        if (['super_admin', 'admin', 'supervisor', 'operador'].includes(role)) {
-            items.push({ icon: ClipboardList, label: "Despachos", path: "/dispatch" });
-            items.push({ icon: FileText, label: "Liquidación", path: "/settlement" });
-            items.push({ icon: ShoppingCart, label: "Gestión Pedidos", path: "/orders" });
-            items.push({ icon: Warehouse, label: "Almacenes", path: "/warehouses" });
-        }
-
-        // GESTIÓN DE PERSONAL
-        if (['super_admin', 'admin', 'supervisor'].includes(role)) {
+        // GESTIÓN DE PERSONAL - Solo Admin y Supervisor (No Operadores)
+        if (['admin', 'supervisor'].includes(role)) {
             items.push({ icon: Truck, label: "Transportistas", path: "/carriers" });
             items.push({ icon: Users, label: "Heladeros/Clientes", path: "/sellers" });
         }
 
-        // ADMINISTRACIÓN
+        // ADMINISTRACIÓN DE USUARIOS - Solo Admin (Crea supervisores/operadores)
         if (role === 'admin') {
             items.push({ icon: Users, label: "Usuarios Staff", path: "/users" });
         }
 
-        // REPORTES
-        if (['super_admin', 'admin', 'supervisor', 'operador'].includes(role)) {
-            items.push({ icon: FileText, label: "Reportes", path: "/reports" });
-        }
+        // REPORTES - Todos los roles de gestión
+        items.push({ icon: FileText, label: "Reportes", path: "/reports" });
 
-        // CONFIGURACIÓN (Para todos)
+        // CONFIGURACIÓN - Todos
         items.push({ icon: Settings, label: "Configuración", path: "/configuration" });
 
         return items;
