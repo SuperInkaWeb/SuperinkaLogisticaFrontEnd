@@ -44,7 +44,7 @@ const IceCreamSellers: React.FC = () => {
     const [paymentNote, setPaymentNote] = useState("");
     const [isProcessing, setIsProcessing] = useState(false);
 
-    // Cálculos de validación para Amortización
+    // Cálculos de validación
     const currentDebt = selectedSeller?.debt ?? selectedSeller?.currentDebt ?? 0;
     const numericAmount = parseFloat(amountToPay || "0");
     const isAmountExcessive = numericAmount > currentDebt;
@@ -97,7 +97,7 @@ const IceCreamSellers: React.FC = () => {
                 // Actualización optimista de la tabla
                 setSellers(prev => prev.map(s =>
                     s.id === selectedSeller.id
-                        ? { ...s, debt: (s.debt || 0) - numericAmount }
+                        ? { ...s, debt: (s.debt || 0) - numericAmount, currentDebt: (s.currentDebt || 0) - numericAmount }
                         : s
                 ));
                 setIsAmortizeOpen(false);
@@ -118,7 +118,6 @@ const IceCreamSellers: React.FC = () => {
         setIsProcessing(true);
         try {
             await updateSeller(editingSeller.id, editingSeller as IceCreamSeller);
-            // Actualización optimista de la tabla
             setSellers(prev => prev.map(s => s.id === editingSeller.id ? { ...s, ...editingSeller } as IceCreamSeller : s));
             setIsEditOpen(false);
             toast({ title: "Cambios guardados", description: `Se actualizó el perfil de ${editingSeller.name}.` });
@@ -140,7 +139,6 @@ const IceCreamSellers: React.FC = () => {
     return (
         <DashboardLayout>
             <div className="space-y-6 animate-fade-in max-w-6xl mx-auto">
-                {/* CABECERA */}
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                     <div>
                         <h1 className="text-3xl font-bold tracking-tight text-gray-900 dark:text-gray-100">Cartera de Heladeros</h1>
@@ -157,7 +155,6 @@ const IceCreamSellers: React.FC = () => {
                     </div>
                 </div>
 
-                {/* KPI CARDS */}
                 <div className="grid gap-4 md:grid-cols-2">
                     <Card className="bg-red-50 dark:bg-red-900/10 border-red-100">
                         <CardContent className="p-6 flex items-center justify-between">
@@ -183,7 +180,6 @@ const IceCreamSellers: React.FC = () => {
                     </Card>
                 </div>
 
-                {/* TABLA PRINCIPAL */}
                 <Card>
                     <CardHeader>
                         <CardTitle>Listado de Cuentas Corrientes</CardTitle>
