@@ -1,11 +1,14 @@
 import axios from 'axios';
 
-// Usando ruta relativa para aprovechar el proxy de Vite
-// El proxy redirigirá /api a http://localhost:8080/api
-const API_URL = '/api';
+/**
+ * Usamos variables de entorno de Vite.
+ * En Local: Usará http://localhost:8080/api/v1 (vía fallback)
+ * En Producción (Vercel): Usará el valor de la variable VITE_API_URL definida en el dashboard.
+ */
+const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080/api/v1';
 
 export const api = axios.create({
-    baseURL: API_URL,
+    baseURL: BASE_URL,
     headers: {
         'Content-Type': 'application/json',
     },
@@ -23,13 +26,18 @@ api.interceptors.request.use(
     (error) => Promise.reject(error)
 );
 
-// Interceptor: Si el token expira (401), cierra sesión
+// Interceptor: Manejo de errores globales
 api.interceptors.response.use(
     (response) => response,
     (error) => {
+        // Si el token expira o es inválido (401)
         if (error.response?.status === 401) {
             localStorage.removeItem('token');
-            window.location.href = '/login';
+            localStorage.removeItem('user');
+            // Evitar bucles infinitos de redirección si ya estamos en login
+            if (!window.location.pathname.includes('/login')) {
+                window.location.href = '/login';
+            }
         }
         return Promise.reject(error);
     }

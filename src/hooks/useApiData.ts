@@ -89,8 +89,10 @@ export interface IceCreamSeller {
     address?: string;
     active?: boolean;
     currentDebt?: number;
+    debt?: number; // Alias para compatibilidad con frontend
+    code?: string; // Código del heladero
     creditLimit?: number;
-    role?: string; // Campo nuevo para distinguir Cliente/Heladero
+    role?: string;
 }
 
 export interface OrderItem {
@@ -98,7 +100,7 @@ export interface OrderItem {
     productId?: string;
     productName: string;
     quantity: number;
-    quantityDelivered?: number; // Lo que ya se despachó
+    quantityDelivered?: number;
     price: number;
 }
 
@@ -118,7 +120,7 @@ export interface Order {
     items?: OrderItem[];
     deliveryType?: 'delivery' | 'warehouse';
     paymentStatus?: 'pending' | 'partial' | 'paid';
-    user?: User; // Para filtrar en frontend si es necesario
+    user?: User;
     userId?: string;
 }
 
@@ -291,11 +293,12 @@ export const useApiData = () => {
     const updateSeller = async (id: string, data: IceCreamSeller) => { try { const res = await api.put(`/v1/sellers/${id}`, data); toast({ title: "Éxito", description: "Heladero actualizado" }); return res.data; } catch (e) { handleError(e, 'actualizar heladero'); throw e; } };
     const deleteSeller = async (id: string) => { try { await api.delete(`/v1/sellers/${id}`); return true; } catch (e) { handleError(e, 'eliminar heladero'); return false; } };
 
-    // --- NUEVA FUNCIÓN AÑADIDA ---
-    const registerPayment = async (sellerId: string, amount: number) => {
+    // --- FUNCIÓN DE DEUDA/PAGOS (REAL) ---
+    const updateUserDebt = async (sellerId: string, amount: number, note?: string) => {
         try {
-            await api.post(`/v1/sellers/${sellerId}/payment`, { amount });
-            toast({ title: "Pago Registrado", description: `Se amortizaron S/ ${amount}` });
+            // Llamada al endpoint real del backend
+            await api.post(`/v1/sellers/${sellerId}/payment`, { amount, note });
+            toast({ title: "Pago Registrado", description: `Se procesaron S/ ${amount}` });
             return true;
         } catch (e) {
             handleError(e, 'registrar pago');
@@ -318,6 +321,6 @@ export const useApiData = () => {
         createSeller, updateSeller, deleteSeller,
         createDailyLoad, closeDailyLoad,
         createAsset, updateAsset, deleteAsset,
-        registerPayment
+        updateUserDebt
     };
 };

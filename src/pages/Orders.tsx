@@ -4,11 +4,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-// CORRECCIÓN: Importamos la interfaz Carrier
 import { useApiData, Order, Carrier } from "@/hooks/useApiData";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useAuth } from "@/frontend/context/AuthContext";
-import { Eye, Truck, CheckCircle, Store, ArrowRight, XCircle, Search, Calendar, History } from "lucide-react";
+import { Eye, Truck, CheckCircle, Store, ArrowRight, XCircle, Search, Calendar, History, X } from "lucide-react";
 import { useCurrency } from "@/context/CurrencyContext";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
@@ -23,14 +22,20 @@ const Orders: React.FC = () => {
     const { toast } = useToast();
 
     const [orders, setOrders] = useState<Order[]>([]);
-    // CORRECCIÓN (Línea 25): Tipado correcto del estado de transportistas
     const [carriers, setCarriers] = useState<Carrier[]>([]);
     const [selectedCarrier, setSelectedCarrier] = useState("");
 
-    // Estados para Filtros
+    // --- ESTADOS DE FILTROS ---
     const today = new Date().toISOString().split('T')[0];
-    const [dateFilter, setDateFilter] = useState<string>(today);
+
+    // Filtros Admin/Staff
+    const [adminDateFilter, setAdminDateFilter] = useState<string>(today);
     const [showHistory, setShowHistory] = useState(false);
+
+    // Filtros Cliente
+    const [clientDateFilter, setClientDateFilter] = useState<string>(""); // Vacío = Ver todo el historial
+
+    // Filtros Comunes
     const [searchTerm, setSearchTerm] = useState("");
     const [statusFilter, setStatusFilter] = useState("todos");
 
@@ -58,12 +63,15 @@ const Orders: React.FC = () => {
 
     // --- LÓGICA DE FILTRADO ---
     const filteredOrders = orders.filter(order => {
-        // 1. Filtro de Fecha
+        // 1. Filtro de Fecha (Diferenciado por Rol)
         let matchesDate = true;
+
         if (isAdminOrStaff) {
-            matchesDate = showHistory || (order.date === dateFilter);
+            // Admin: Por defecto HOY, a menos que active "Histórico"
+            matchesDate = showHistory || (order.date === adminDateFilter);
         } else {
-            matchesDate = searchTerm ? true : (order.date === dateFilter);
+            // Cliente: Por defecto TODO (Histórico), a menos que elija una fecha específica
+            matchesDate = clientDateFilter === "" || (order.date === clientDateFilter);
         }
 
         // 2. Filtro de Estado
@@ -72,8 +80,6 @@ const Orders: React.FC = () => {
         // 3. Buscador (Nro Orden o Cliente)
         const searchLower = searchTerm.toLowerCase();
         const orderNum = order.orderNumber?.toLowerCase() || "";
-
-        // CORRECCIÓN (Línea 77): Acceso directo seguro sin 'as any'
         const clientName = order.user?.name?.toLowerCase() || "";
 
         const matchesSearch = orderNum.includes(searchLower) || clientName.includes(searchLower);
@@ -106,7 +112,6 @@ const Orders: React.FC = () => {
     };
 
     const getStatusBadge = (status: string) => {
-        // CORRECCIÓN (Línea 108): Tipado explícito para el objeto de estilos
         const styles: Record<string, string> = {
             'pendiente': 'bg-yellow-500 hover:bg-yellow-600',
             'en_proceso': 'bg-blue-500 hover:bg-blue-600',
@@ -127,7 +132,7 @@ const Orders: React.FC = () => {
                             {isAdminOrStaff ? "Gestión de Pedidos" : "Mis Pedidos"}
                         </h1>
                         <p className="text-muted-foreground">
-                            {isAdminOrStaff ? "Administra el flujo de despacho y entrega." : "Historial y estado de tus compras."}
+                            {isAdminOrStaff ? "Administra el flujo de despacho y entrega." : "Historial completo de tus compras."}
                         </p>
                     </div>
 
@@ -151,7 +156,7 @@ const Orders: React.FC = () => {
                 </div>
 
                 {/* BARRA DE FILTROS */}
-                <Card className={`border-l-4 ${isAdminOrStaff ? 'border-l-primary' : 'border-l-slate-400'}`}>
+                <Card className={`border-l-4 ${isAdminOrStaff ? 'border-l-primary' : 'border-l-blue-400'}`}>
                     <CardContent className="p-4 flex flex-col md:flex-row gap-4 items-end md:items-center">
 
                         {/* 1. Buscador (VISIBLE PARA TODOS) */}
@@ -161,7 +166,7 @@ const Orders: React.FC = () => {
                                 <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
                                 <Input
                                     id="search"
-                                    placeholder={isAdminOrStaff ? "Nro Orden o Cliente..." : "Buscar mis pedidos..."}
+                                    placeholder={isAdminOrStaff ? "Nro Orden o Cliente..." : "Buscar en mi historial..."}
                                     className="pl-9"
                                     value={searchTerm}
                                     onChange={(e) => setSearchTerm(e.target.value)}
@@ -169,55 +174,77 @@ const Orders: React.FC = () => {
                             </div>
                         </div>
 
-                        {/* FILTROS SOLO PARA GESTIÓN */}
-                        {isAdminOrStaff && (
-                            <>
-                                {/* 2. Filtro de Estado */}
-                                <div className="w-full md:w-[180px] space-y-1">
-                                    <Label className="text-xs font-semibold">Estado</Label>
-                                    <Select value={statusFilter} onValueChange={setStatusFilter}>
-                                        <SelectTrigger>
-                                            <SelectValue placeholder="Todos" />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="todos">Todos</SelectItem>
-                                            <SelectItem value="pendiente">Pendientes</SelectItem>
-                                            <SelectItem value="en_proceso">En Proceso</SelectItem>
-                                            <SelectItem value="en_ruta">En Ruta</SelectItem>
-                                            <SelectItem value="entregado">Entregados</SelectItem>
-                                            <SelectItem value="cancelado">Cancelados</SelectItem>
-                                        </SelectContent>
-                                    </Select>
-                                </div>
+                        {/* 2. Filtro de Estado (VISIBLE PARA TODOS PERO SIMPLIFICADO VISUALMENTE) */}
+                        <div className="w-full md:w-[180px] space-y-1">
+                            <Label className="text-xs font-semibold">Estado</Label>
+                            <Select value={statusFilter} onValueChange={setStatusFilter}>
+                                <SelectTrigger>
+                                    <SelectValue placeholder="Todos" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="todos">Todos</SelectItem>
+                                    <SelectItem value="pendiente">Pendientes</SelectItem>
+                                    <SelectItem value="en_proceso">En Proceso</SelectItem>
+                                    <SelectItem value="en_ruta">En Ruta</SelectItem>
+                                    <SelectItem value="entregado">Entregados</SelectItem>
+                                    <SelectItem value="cancelado">Cancelados</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
 
-                                {/* 3. Filtro de Fecha */}
-                                <div className="w-full md:w-auto flex items-center gap-4">
-                                    <div className="space-y-1">
-                                        <Label htmlFor="date" className={`text-xs font-semibold ${showHistory ? 'text-muted-foreground' : ''}`}>Fecha</Label>
-                                        <div className="relative">
-                                            <Calendar className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                                            <Input
-                                                id="date"
-                                                type="date"
-                                                className="pl-9 w-[160px]"
-                                                value={dateFilter}
-                                                onChange={(e) => { setDateFilter(e.target.value); setShowHistory(false); }}
-                                                disabled={showHistory}
-                                            />
-                                        </div>
+                        {/* 3. Filtro de Fecha (DIFERENCIADO) */}
+                        <div className="w-full md:w-auto flex items-center gap-4">
+                            <div className="space-y-1">
+                                <Label htmlFor="date" className={`text-xs font-semibold ${isAdminOrStaff && showHistory ? 'text-muted-foreground' : ''}`}>
+                                    {isAdminOrStaff ? "Fecha Operativa" : "Filtrar por Fecha"}
+                                </Label>
+                                <div className="relative flex items-center gap-2">
+                                    <div className="relative">
+                                        <Calendar className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                                        <Input
+                                            id="date"
+                                            type="date"
+                                            className="pl-9 w-[160px]"
+                                            // Lógica condicional de valor y cambio según rol
+                                            value={isAdminOrStaff ? adminDateFilter : clientDateFilter}
+                                            onChange={(e) => {
+                                                if (isAdminOrStaff) {
+                                                    setAdminDateFilter(e.target.value);
+                                                    setShowHistory(false); // Al cambiar fecha, salimos del modo histórico
+                                                } else {
+                                                    setClientDateFilter(e.target.value);
+                                                }
+                                            }}
+                                            disabled={isAdminOrStaff && showHistory}
+                                        />
                                     </div>
+                                    {/* Botón para limpiar filtro de fecha (Solo Cliente) */}
+                                    {!isAdminOrStaff && clientDateFilter && (
+                                        <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            className="h-9 w-9"
+                                            onClick={() => setClientDateFilter("")}
+                                            title="Ver todo el historial"
+                                        >
+                                            <X className="h-4 w-4 text-muted-foreground hover:text-red-500"/>
+                                        </Button>
+                                    )}
+                                </div>
+                            </div>
 
-                                    <div className="flex flex-col space-y-2 mt-5">
-                                        <div className="flex items-center space-x-2">
-                                            <Switch id="history-mode" checked={showHistory} onCheckedChange={setShowHistory} />
-                                            <Label htmlFor="history-mode" className="text-sm font-medium cursor-pointer flex items-center gap-1">
-                                                <History className="h-3 w-3" /> Histórico
-                                            </Label>
-                                        </div>
+                            {/* Switch de Histórico (SOLO ADMIN) */}
+                            {isAdminOrStaff && (
+                                <div className="flex flex-col space-y-2 mt-5">
+                                    <div className="flex items-center space-x-2">
+                                        <Switch id="history-mode" checked={showHistory} onCheckedChange={setShowHistory} />
+                                        <Label htmlFor="history-mode" className="text-sm font-medium cursor-pointer flex items-center gap-1">
+                                            <History className="h-3 w-3" /> Histórico
+                                        </Label>
                                     </div>
                                 </div>
-                            </>
-                        )}
+                            )}
+                        </div>
                     </CardContent>
                 </Card>
 
@@ -225,12 +252,11 @@ const Orders: React.FC = () => {
                 <Card>
                     <CardHeader className="pb-2">
                         <CardTitle className="text-lg">
-                            {/* Título dinámico según rol y filtros */}
-                            {!isAdminOrStaff && !searchTerm
-                                ? "Pedidos de Hoy"
-                                : showHistory || searchTerm
-                                    ? 'Resultados'
-                                    : `Pedidos del ${dateFilter}`}
+                            {/* Título dinámico */}
+                            {isAdminOrStaff
+                                ? (showHistory ? 'Historial Completo' : `Pedidos del ${adminDateFilter}`)
+                                : (clientDateFilter ? `Pedidos del ${clientDateFilter}` : 'Mi Historial de Pedidos')
+                            }
                         </CardTitle>
                     </CardHeader>
                     <CardContent>
@@ -250,7 +276,7 @@ const Orders: React.FC = () => {
                                 {filteredOrders.length === 0 ? (
                                     <TableRow>
                                         <TableCell colSpan={isAdminOrStaff ? 7 : 6} className="text-center h-24 text-muted-foreground">
-                                            No se encontraron pedidos.
+                                            No se encontraron pedidos {clientDateFilter ? 'en esta fecha' : ''}.
                                         </TableCell>
                                     </TableRow>
                                 ) : (
@@ -263,7 +289,6 @@ const Orders: React.FC = () => {
                                                     <span className="text-[10px] text-muted-foreground">{order.date}</span>
                                                 </div>
                                             </TableCell>
-                                            {/* CORRECCIÓN: Acceso seguro a nombre de usuario */}
                                             {isAdminOrStaff && <TableCell className="font-medium">{order.user?.name || 'Usuario'}</TableCell>}
                                             <TableCell>
                                                 <div className="flex items-center gap-2">
@@ -285,7 +310,7 @@ const Orders: React.FC = () => {
                                             <TableCell className="text-right">
                                                 <div className="flex justify-end gap-2 items-center">
 
-                                                    {/* ASIGNAR TRANSPORTE */}
+                                                    {/* ASIGNAR TRANSPORTE (Solo Staff) */}
                                                     {isAdminOrStaff && order.deliveryType === 'delivery' && !['entregado', 'cancelado'].includes(order.status || '') && (
                                                         <div className="flex gap-1 items-center mr-2">
                                                             {!order.carrier ? (
@@ -310,7 +335,7 @@ const Orders: React.FC = () => {
                                                         </div>
                                                     )}
 
-                                                    {/* BOTONES DE FLUJO */}
+                                                    {/* BOTONES DE FLUJO (Solo Staff) */}
                                                     {isAdminOrStaff && (
                                                         <>
                                                             {order.status === 'pendiente' && (
@@ -359,7 +384,6 @@ const Orders: React.FC = () => {
                                 <div className="grid grid-cols-2 gap-4 text-sm bg-slate-50 dark:bg-slate-900 p-4 rounded-lg">
                                     <div className="space-y-1">
                                         <span className="text-muted-foreground font-semibold">Cliente:</span>
-                                        {/* CORRECCIÓN (Línea 264): Acceso seguro a nombre de usuario */}
                                         <p className="font-medium">{selectedOrder.user?.name}</p>
                                         <p className="text-xs text-muted-foreground">{selectedOrder.user?.email}</p>
                                     </div>
