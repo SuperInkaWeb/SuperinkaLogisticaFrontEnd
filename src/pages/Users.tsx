@@ -7,17 +7,19 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { useApiData, User } from "@/hooks/useApiData"; // Usamos la interfaz User correcta
+import { useApiData, User, Company } from "@/hooks/useApiData"; // Importamos Company
 import { useToast } from "@/hooks/use-toast";
-import { Search, User as UserIcon, Shield, Trash2, Edit, Plus, UserCog, Briefcase, Eye, EyeOff } from "lucide-react";
+import { Search, User as UserIcon, Shield, Trash2, Edit, Plus, UserCog, Briefcase, Eye, EyeOff, Building2 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useAuth } from "@/frontend/context/AuthContext"; // Para saber si soy Super Admin
 
 const Users: React.FC = () => {
-    // Conectamos con los métodos de Usuarios del hook, no de Sellers
-    const { getUsers, createUser, updateUser, deleteUser } = useApiData();
+    const { user: currentUser } = useAuth();
+    const { getUsers, createUser, updateUser, deleteUser, getCompanies } = useApiData();
     const { toast } = useToast();
 
     const [users, setUsers] = useState<User[]>([]);
+    const [companies, setCompanies] = useState<Company[]>([]); // Estado para empresas
     const [loading, setLoading] = useState(true);
 
     // Filtro
@@ -28,17 +30,36 @@ const Users: React.FC = () => {
     const [isDeleteOpen, setIsDeleteOpen] = useState(false);
 
     // Estado para Edición/Creación
-    const [currentUser, setCurrentUser] = useState<Partial<User>>({});
+    const [formData, setFormData] = useState<Partial<User>>({});
     const [isEditing, setIsEditing] = useState(false);
     const [showPassword, setShowPassword] = useState(false);
+
+    // Verificar si soy Super Admin
+    const isSuperAdmin = currentUser?.role?.toLowerCase().includes('super');
 
     const loadData = async () => {
         setLoading(true);
         try {
-            const data = await getUsers();
-            setUsers(data);
+            // Cargamos usuarios y empresas en paralelo si es necesario
+            // Corrección de tipo para evitar 'any'
+            const promises: Promise<User[] | Company[]>[] = [getUsers()];
+            if (isSuperAdmin) {
+                promises.push(getCompanies());
+            }
+
+            const [usersData, companiesData] = await Promise.all(promises);
+
+            // Asignación segura con verificación de tipo (type guard simple)
+            setUsers(Array.isArray(usersData) ? (usersData as User[]) : []);
+
+            // Si companiesData existe (fue la segunda promesa), lo asignamos
+            if (companiesData && Array.isArray(companiesData)) {
+                setCompanies(companiesData as Company[]);
+            }
+
         } catch (error) {
-            console.error("Error cargando usuarios", error);
+            console.error("Error cargando datos", error);
+            setUsers([]);
         } finally {
             setLoading(false);
         }
@@ -46,90 +67,93 @@ const Users: React.FC = () => {
 
     useEffect(() => {
         loadData();
-    }, []);
+    }, [currentUser]); // Recargar si cambia el usuario
 
     // --- FILTRADO ---
     const filteredUsers = users.filter(user => {
         const search = searchTerm.toLowerCase();
         const nameMatch = user.name?.toLowerCase().includes(search);
         const emailMatch = user.email?.toLowerCase().includes(search);
-        return nameMatch || emailMatch;
+        const companyMatch = user.companyName?.toLowerCase().includes(search); // Buscar también por empresa
+        return nameMatch || emailMatch || companyMatch;
     });
 
     // --- HANDLERS DEL CRUD ---
 
     const handleCreate = () => {
-        // Inicializamos con rol limpio 'operador' por defecto
-        setCurrentUser({ name: "", email: "", role: "operador", password: "" });
+        setFormData({ name: "", email: "", role: "operador", password: "", companyId: "" });
         setIsEditing(false);
         setIsFormOpen(true);
         setShowPassword(false);
     };
 
     const handleEdit = (user: User) => {
-        // Normalizamos el rol en caso de que venga sucio, pero preferimos el valor directo
-        // El backend UserController espera el rol sin prefijos (ej: "admin", "operador")
-        let currentRole = user.role?.toLowerCase().replace('role_', '') || 'operador';
+        // CORRECCIÓN: Usar const en lugar de let
+        const currentRole = user.role?.toLowerCase().replace('role_', '') || 'operador';
 
-        // Al editar, la contraseña empieza vacía (solo se envía si se quiere cambiar)
-        setCurrentUser({ ...user, role: currentRole, password: "" });
+        // Al editar, la contraseña empieza vacía
+        // Mantenemos el companyId existente
+        setFormData({ ...user, role: currentRole, password: "" });
         setIsEditing(true);
         setIsFormOpen(true);
         setShowPassword(false);
     };
 
     const handleDeleteClick = (user: User) => {
-        setCurrentUser(user);
+        setFormData(user);
         setIsDeleteOpen(true);
     };
 
     const saveUser = async () => {
         // Validación básica
-        if (!currentUser.name || !currentUser.email) {
+        if (!formData.name || !formData.email) {
             toast({ variant: "destructive", title: "Error", description: "Nombre y Email son obligatorios." });
             return;
         }
 
-        // Validación de contraseña para nuevos usuarios
-        if (!isEditing && !currentUser.password) {
+        if (!isEditing && !formData.password) {
             toast({ variant: "destructive", title: "Error", description: "La contraseña es obligatoria para nuevos usuarios." });
             return;
         }
 
+        // Validación de Empresa para Super Admin
+        if (isSuperAdmin && !formData.companyId && formData.role !== 'super_admin' && !isEditing) {
+            // Opcional: Podrías permitir crear sin empresa (global), pero para Admin de empresa es obligatorio
+            if (formData.role === 'admin') {
+                toast({ variant: "destructive", title: "Error", description: "Debes asignar una empresa al Administrador." });
+                return;
+            }
+        }
+
         try {
             if (isEditing) {
-                // Si el campo password está vacío, lo eliminamos para no enviarlo vacío
-                const userToUpdate = { ...currentUser };
+                const userToUpdate = { ...formData };
                 if (!userToUpdate.password) {
                     delete userToUpdate.password;
                 }
 
-                if (currentUser.id) {
-                    await updateUser(currentUser.id, userToUpdate as User);
-                    // Actualizar lista localmente
-                    setUsers(prev => prev.map(u => u.id === currentUser.id ? { ...u, ...userToUpdate } as User : u));
-                    toast({ title: "Usuario Actualizado", description: `Datos de ${currentUser.name} guardados.` });
+                if (formData.id) {
+                    await updateUser(formData.id, userToUpdate as User);
+                    loadData(); // Recargar para ver cambios (ej. empresa actualizada)
+                    toast({ title: "Usuario Actualizado", description: `Datos guardados.` });
                 }
             } else {
-                // Crear nuevo usuario
-                await createUser(currentUser as User);
-                // Recargamos datos para obtener el ID generado y asegurar consistencia
+                await createUser(formData as User);
                 loadData();
-                toast({ title: "Usuario Creado", description: `Bienvenido ${currentUser.name}` });
+                toast({ title: "Usuario Creado", description: `Bienvenido ${formData.name}` });
             }
             setIsFormOpen(false);
         } catch (error) {
             console.error(error);
-            // El hook ya muestra el error via toast
         }
     };
 
     const confirmDelete = async () => {
-        if (!currentUser.id) return;
+        if (!formData.id) return;
         try {
-            const success = await deleteUser(currentUser.id);
+            const success = await deleteUser(formData.id);
             if (success) {
-                setUsers(prev => prev.filter(u => u.id !== currentUser.id));
+                setUsers(prev => prev.filter(u => u.id !== formData.id));
                 toast({ title: "Usuario Eliminado", description: "Cuenta removida del sistema." });
                 setIsDeleteOpen(false);
             }
@@ -139,9 +163,7 @@ const Users: React.FC = () => {
     };
 
     const getRoleBadge = (role: string = '') => {
-        // Normalizar para visualización
         const normalizedRole = role.toLowerCase().replace('role_', '');
-
         switch (normalizedRole) {
             case 'admin':
             case 'super_admin':
@@ -150,9 +172,6 @@ const Users: React.FC = () => {
                 return <Badge className="bg-blue-100 text-blue-700 border-blue-200 hover:bg-blue-200"><UserCog className="w-3 h-3 mr-1"/> Supervisor</Badge>;
             case 'operador':
                 return <Badge variant="secondary" className="bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200"><Briefcase className="w-3 h-3 mr-1"/> Operador</Badge>;
-            case 'heladero':
-                // Aunque los heladeros se gestionan en otra vista, si aparecieran aquí:
-                return <Badge variant="secondary" className="bg-orange-100 text-orange-700 border-orange-200 hover:bg-orange-200">Heladero</Badge>;
             case 'cliente':
                 return <Badge variant="outline" className="text-green-700 border-green-200 bg-green-50 hover:bg-green-100">Cliente</Badge>;
             default:
@@ -203,6 +222,8 @@ const Users: React.FC = () => {
                                         <TableHead>Nombre</TableHead>
                                         <TableHead>Email</TableHead>
                                         <TableHead>Rol</TableHead>
+                                        {/* Columna extra para Empresa si es Super Admin */}
+                                        {isSuperAdmin && <TableHead>Empresa</TableHead>}
                                         <TableHead>Estado</TableHead>
                                         <TableHead className="text-right">Acciones</TableHead>
                                     </TableRow>
@@ -210,7 +231,7 @@ const Users: React.FC = () => {
                                 <TableBody>
                                     {filteredUsers.length === 0 ? (
                                         <TableRow>
-                                            <TableCell colSpan={5} className="text-center h-24 text-muted-foreground">
+                                            <TableCell colSpan={isSuperAdmin ? 6 : 5} className="text-center h-24 text-muted-foreground">
                                                 No se encontraron usuarios.
                                             </TableCell>
                                         </TableRow>
@@ -229,6 +250,18 @@ const Users: React.FC = () => {
                                                 <TableCell>
                                                     {getRoleBadge(user.role)}
                                                 </TableCell>
+                                                {/* Mostrar Empresa */}
+                                                {isSuperAdmin && (
+                                                    <TableCell>
+                                                        {user.companyName ? (
+                                                            <div className="flex items-center gap-1 text-sm text-slate-600">
+                                                                <Building2 className="w-3 h-3"/> {user.companyName}
+                                                            </div>
+                                                        ) : (
+                                                            <span className="text-xs text-muted-foreground italic">Global</span>
+                                                        )}
+                                                    </TableCell>
+                                                )}
                                                 <TableCell>
                                                     {user.enabled !== false ?
                                                         <Badge variant="outline" className="text-green-600 bg-green-50 border-green-200 text-[10px]">Activo</Badge> :
@@ -264,12 +297,13 @@ const Users: React.FC = () => {
                             </DialogDescription>
                         </DialogHeader>
                         <div className="grid gap-4 py-4">
+                            {/* Campos Básicos */}
                             <div className="space-y-2">
                                 <Label htmlFor="name">Nombre Completo</Label>
                                 <Input
                                     id="name"
-                                    value={currentUser.name || ''}
-                                    onChange={(e) => setCurrentUser({...currentUser, name: e.target.value})}
+                                    value={formData.name || ''}
+                                    onChange={(e) => setFormData({...formData, name: e.target.value})}
                                 />
                             </div>
                             <div className="space-y-2">
@@ -277,10 +311,12 @@ const Users: React.FC = () => {
                                 <Input
                                     id="email"
                                     type="email"
-                                    value={currentUser.email || ''}
-                                    onChange={(e) => setCurrentUser({...currentUser, email: e.target.value})}
+                                    value={formData.email || ''}
+                                    onChange={(e) => setFormData({...formData, email: e.target.value})}
                                 />
                             </div>
+
+                            {/* Contraseña */}
                             <div className="space-y-2">
                                 <div className="flex justify-between items-center">
                                     <Label htmlFor="password">
@@ -292,8 +328,8 @@ const Users: React.FC = () => {
                                     <Input
                                         id="password"
                                         type={showPassword ? "text" : "password"}
-                                        value={currentUser.password || ''}
-                                        onChange={(e) => setCurrentUser({...currentUser, password: e.target.value})}
+                                        value={formData.password || ''}
+                                        onChange={(e) => setFormData({...formData, password: e.target.value})}
                                         placeholder={isEditing ? "••••••" : "Ingrese contraseña"}
                                         className="pr-10"
                                     />
@@ -308,25 +344,52 @@ const Users: React.FC = () => {
                                     </Button>
                                 </div>
                             </div>
+
+                            {/* Rol */}
                             <div className="space-y-2">
                                 <Label htmlFor="role">Rol del Sistema</Label>
                                 <Select
-                                    value={currentUser.role}
-                                    onValueChange={(val) => setCurrentUser({...currentUser, role: val})}
+                                    value={formData.role}
+                                    onValueChange={(val) => setFormData({...formData, role: val})}
                                 >
                                     <SelectTrigger>
                                         <SelectValue placeholder="Seleccionar rol" />
                                     </SelectTrigger>
                                     <SelectContent>
-                                        {/* Usamos valores directos según lo que espera AppRole.valueOf() en backend */}
-                                        <SelectItem value="admin">Administrador</SelectItem>
+                                        {isSuperAdmin && <SelectItem value="super_admin">Super Admin (Global)</SelectItem>}
+                                        <SelectItem value="admin">Administrador de Empresa</SelectItem>
                                         <SelectItem value="supervisor">Supervisor</SelectItem>
                                         <SelectItem value="operador">Operador</SelectItem>
-                                        <SelectItem value="cliente">Cliente</SelectItem>
-                                        <SelectItem value="heladero">Heladero</SelectItem>
+                                        <SelectItem value="cliente">Cliente (Heladero)</SelectItem>
                                     </SelectContent>
                                 </Select>
                             </div>
+
+                            {/* SELECCIÓN DE EMPRESA (Solo Super Admin) */}
+                            {isSuperAdmin && formData.role !== 'super_admin' && (
+                                <div className="space-y-2">
+                                    <Label htmlFor="company">Empresa Asignada</Label>
+                                    <Select
+                                        value={formData.companyId || ""}
+                                        onValueChange={(val) => setFormData({...formData, companyId: val})}
+                                    >
+                                        <SelectTrigger>
+                                            <SelectValue placeholder="Seleccionar empresa..." />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {companies.map(c => (
+                                                <SelectItem key={c.id} value={c.id || 'invalid'}>
+                                                    {c.name}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                    <p className="text-[10px] text-muted-foreground">
+                                        El usuario pertenecerá exclusivamente a esta empresa.
+                                    </p>
+                                </div>
+                            )}
+
                         </div>
                         <DialogFooter>
                             <Button variant="outline" onClick={() => setIsFormOpen(false)}>Cancelar</Button>
@@ -341,7 +404,7 @@ const Users: React.FC = () => {
                         <DialogHeader>
                             <DialogTitle>¿Estás seguro?</DialogTitle>
                             <DialogDescription>
-                                Esta acción eliminará permanentemente al usuario <strong>{currentUser.name}</strong>. No se puede deshacer.
+                                Esta acción eliminará permanentemente al usuario <strong>{formData.name}</strong>. No se puede deshacer.
                             </DialogDescription>
                         </DialogHeader>
                         <DialogFooter>
